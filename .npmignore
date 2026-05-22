@@ -1,0 +1,32 @@
+# npm-publish whitelist is in package.json `files: ["dist"]`.
+# This .npmignore is the belt-and-braces second layer — anything matched here
+# is excluded from the npm tarball even if `files` is removed or widened.
+
+# Source TS (only the compiled dist/ ships)
+credentials/
+nodes/
+test/
+src/
+
+# Configs
+tsconfig*.json
+.eslintrc*
+.prettierrc*
+.prettierignore
+gulpfile.js
+vitest.config.ts
+
+# Repo metadata
+.git/
+.github/
+.gitignore
+doc-internal/
+docs/
+CHANGELOG.md
+*.tsbuildinfo
+coverage/
+
+# Editor + OS
+.vscode/
+.idea/
+.DS_Store

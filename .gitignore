@@ -34,3 +34,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# build output
+/dist/
+
+# test coverage
+/coverage/
+
+# internal planning notes (cross-repo design sketches kept out of the published package)
+/doc-internal/
