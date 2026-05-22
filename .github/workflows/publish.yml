@@ -1,0 +1,35 @@
+# Publish workflow — DRY-RUN ONLY through Sub-phase 2.5.
+# Becomes a real publish at Sub-phase 2.6 (RFC §"Phase 2.6 — Docs + publish").
+# Triggers on v*.*.* tags + manual dispatch.
+# Uses only the safe github.ref (tag name) implicitly via the trigger; no
+# untrusted-input substitutions (issue titles, PR bodies, commit messages).
+name: publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Dry-run publish (Sub-phase 2.0 — flip --dry-run off in 2.6)
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

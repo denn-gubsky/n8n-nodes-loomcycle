@@ -1,0 +1,29 @@
+{
+	"compilerOptions": {
+		"target": "es2020",
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"lib": ["dom", "es2020", "es2022.error"],
+		"outDir": "./dist/",
+		"rootDir": ".",
+		"strict": true,
+		"esModuleInterop": true,
+		"resolveJsonModule": true,
+		"declaration": true,
+		"sourceMap": true,
+		"incremental": true,
+		"noImplicitAny": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"useUnknownInCatchVariables": false,
+		"skipLibCheck": true
+	},
+	"include": [
+		"credentials/**/*.ts",
+		"nodes/**/*.ts",
+		"test/**/*.ts"
+	],
+	"exclude": ["node_modules", "dist"]
+}
