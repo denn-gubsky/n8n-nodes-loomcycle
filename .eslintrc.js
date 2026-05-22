@@ -32,6 +32,15 @@ module.exports = {
 			files: ['nodes/**/*.ts'],
 			plugins: ['eslint-plugin-n8n-nodes-base'],
 			extends: ['plugin:n8n-nodes-base/nodes'],
+			rules: {
+				// Both rules below have destructive autofixes:
+				// - `display-name-miscased` autofix breaks acronyms (turns "IDs" into "I Ds")
+				// - `description-wrong-for-dynamic-options` autofix APPENDS the canonical
+				//   text rather than replacing the existing description, producing
+				//   duplicated suffixes. We hand-author the canonical string instead.
+				'n8n-nodes-base/node-param-display-name-miscased': 'off',
+				'n8n-nodes-base/node-param-description-wrong-for-dynamic-options': 'off',
+			},
 		},
 		{
 			files: ['package.json'],
