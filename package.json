@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-loomcycle",
-	"version": "0.2.0",
-	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.1 ships the umbrella LoomCycle node with Run / Memory / Channel resources.",
+	"version": "0.3.0",
+	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.2 extends the umbrella LoomCycle node with AgentDef / SkillDef / MCPServerDef substrate-admin resources.",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",

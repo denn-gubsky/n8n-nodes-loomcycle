@@ -6,18 +6,26 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import type { AgentStatus, ChannelScope, RunOptions } from '@loomcycle/client';
+import type { AgentStatus, ChannelScope, RunOptions, SubstrateToolInput } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
 import { buildSegments } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
 import { loadAgents, loadChannels, loadMemoryScopes } from './helpers/loadOptions';
-import { runOps, memoryOps, channelOps } from './descriptions';
+import {
+	runOps,
+	memoryOps,
+	channelOps,
+	agentDefOps,
+	skillDefOps,
+	mcpServerDefOps,
+} from './descriptions';
 
 /**
  * Umbrella action node for the loomcycle agentic runtime. Op-discriminated
- * across three resources in this sub-phase: `run`, `memory`, `channel`.
+ * across six resources: `run`, `memory`, `channel`, `agentDef`,
+ * `skillDef`, `mcpServerDef`.
  *
  * Programmatic execute() (not declarative routing) because the load-bearing
  * paths go through `@loomcycle/client` rather than raw HTTP — typed-error
@@ -31,7 +39,7 @@ export class LoomCycle implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
-		description: 'Drive a loomcycle agentic runtime — Run / Memory / Channel ops over HTTP+SSE',
+		description: 'Drive a loomcycle agentic runtime — Run / Memory / Channel / AgentDef / SkillDef / MCPServerDef ops over HTTP+SSE',
 		defaults: { name: 'LoomCycle' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -42,16 +50,24 @@ export class LoomCycle implements INodeType {
 				name: 'resource',
 				type: 'options',
 				noDataExpression: true,
+				// Alphabetised per n8n-nodes-base convention; default 'run' is
+				// selected by `value`, not array position.
 				options: [
-					{ name: 'Run', value: 'run' },
-					{ name: 'Memory', value: 'memory' },
+					{ name: 'Agent Definition', value: 'agentDef' },
 					{ name: 'Channel', value: 'channel' },
+					{ name: 'MCP Server Definition', value: 'mcpServerDef' },
+					{ name: 'Memory', value: 'memory' },
+					{ name: 'Run', value: 'run' },
+					{ name: 'Skill Definition', value: 'skillDef' },
 				],
 				default: 'run',
 			},
 			...runOps,
 			...memoryOps,
 			...channelOps,
+			...agentDefOps,
+			...skillDefOps,
+			...mcpServerDefOps,
 		],
 	};
 
@@ -81,6 +97,12 @@ export class LoomCycle implements INodeType {
 					row = await executeMemory.call(this, client, operation, i);
 				} else if (resource === 'channel') {
 					row = await executeChannel.call(this, client, operation, i);
+				} else if (resource === 'agentDef') {
+					row = await executeAgentDef.call(this, client, operation, i);
+				} else if (resource === 'skillDef') {
+					row = await executeSkillDef.call(this, client, operation, i);
+				} else if (resource === 'mcpServerDef') {
+					row = await executeMcpServerDef.call(this, client, operation, i);
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`);
 				}
@@ -304,6 +326,119 @@ async function executeChannel(
 	}
 
 	throw new NodeOperationError(this.getNode(), `Unknown channel operation: ${operation}`);
+}
+
+// ---- Substrate-admin dispatchers (AgentDef / SkillDef / MCPServerDef) ----
+
+async function executeAgentDef(
+	this: IExecuteFunctions,
+	client: Awaited<ReturnType<typeof getClient>>,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput.call(this, operation, i);
+	const resp = await client.agentDef(input);
+	return { result: resp } as IDataObject;
+}
+
+async function executeSkillDef(
+	this: IExecuteFunctions,
+	client: Awaited<ReturnType<typeof getClient>>,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput.call(this, operation, i);
+	const resp = await client.skillDef(input);
+	return { result: resp } as IDataObject;
+}
+
+async function executeMcpServerDef(
+	this: IExecuteFunctions,
+	client: Awaited<ReturnType<typeof getClient>>,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput.call(this, operation, i);
+
+	// MCPServerDef-specific: structured Register UI assembles transport
+	// + url + headers as direct overlay fields (Fork uses the JSON
+	// overlay textarea instead).
+	if (operation === 'create') {
+		const transport = this.getNodeParameter('transport', i) as string;
+		if (transport !== 'http' && transport !== 'streamable-http') {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Transport must be HTTP or Streamable-HTTP. Stdio MCP servers must be declared in loomcycle.yaml (not via dynamic registration).`,
+			);
+		}
+		const url = this.getNodeParameter('url', i) as string;
+		const headers = collectHeaders(this.getNodeParameter('headers', i, {}));
+		input.transport = transport;
+		input.url = url;
+		if (Object.keys(headers).length > 0) input.headers = headers;
+	}
+
+	const resp = await client.mcpServerDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * Build the SubstrateToolInput body shared by AgentDef / SkillDef /
+ * MCPServerDef. The closed-set op union covers create/fork/get/list/
+ * promote/retire; verify and rediscover ride the [extra: string]: unknown
+ * index signature on SubstrateToolInput.
+ */
+function buildSubstrateInput(this: IExecuteFunctions, operation: string, i: number): SubstrateToolInput {
+	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
+
+	const name = this.getNodeParameter('name', i, '') as string;
+	if (name) input.name = name;
+
+	const defId = this.getNodeParameter('defId', i, '') as string;
+	if (defId) input.def_id = defId;
+
+	const parentDefId = this.getNodeParameter('parentDefId', i, '') as string;
+	if (parentDefId) input.parent_def_id = parentDefId;
+
+	const description = this.getNodeParameter('defDescription', i, '') as string;
+	if (description) input.description = description;
+
+	if (operation === 'create' || operation === 'fork') {
+		const promote = this.getNodeParameter('promote', i, false) as boolean;
+		input.promote = promote;
+		const overlay = parseJsonField(this.getNodeParameter('overlay', i, '{}'));
+		if (overlay && typeof overlay === 'object' && Object.keys(overlay as object).length > 0) {
+			input.overlay = overlay as Record<string, unknown>;
+		}
+	}
+
+	if (operation === 'verify') {
+		const contentSha256 = this.getNodeParameter('contentSha256', i, '') as string;
+		if (contentSha256) input.content_sha256 = contentSha256;
+	}
+
+	return input;
+}
+
+/**
+ * Collect headers from the n8n fixedCollection shape into a map. The
+ * input shape is `{ header: [{ name, value }, ...] }`. Empty when the
+ * operator added no headers.
+ */
+function collectHeaders(raw: unknown): Record<string, string> {
+	const out: Record<string, string> = {};
+	if (!raw || typeof raw !== 'object') return out;
+	const headerCollection = (raw as { header?: unknown }).header;
+	if (!Array.isArray(headerCollection)) return out;
+	for (const entry of headerCollection) {
+		if (!entry || typeof entry !== 'object') continue;
+		const name = (entry as { name?: unknown }).name;
+		const value = (entry as { value?: unknown }).value;
+		if (typeof name === 'string' && name && typeof value === 'string') {
+			out[name] = value;
+		}
+	}
+	return out;
 }
 
 // ---- Local helpers (kept inline; not shared) ----

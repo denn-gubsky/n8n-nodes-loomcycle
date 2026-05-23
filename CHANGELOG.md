@@ -2,6 +2,28 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-23
+
+Sub-phase 2.2 — substrate-admin resources. The umbrella `LoomCycle` node gains three new resources for versioned-definition management.
+
+### Added
+
+- **Resource: Agent Definition** — 7 ops (Create, Fork, Get, List Versions, Promote, Retire, Verify). Maps to `client.agentDef({op, ...})`. Supports overlay-diff JSON for Create/Fork, `content_sha256` round-trip for Verify.
+- **Resource: Skill Definition** — 7 ops (same shape as AgentDef). Maps to `client.skillDef`.
+- **Resource: MCP Server Definition** — 8 ops (Fork, Get, List Versions, Promote, Rediscover, Register, Retire, Verify). Maps to `client.mcpServerDef`. Register UI uses structured `transport` + `URL` + `headers` fields (stdio transport rejected with `NodeOperationError` — yaml-only). Headers support `${LOOMCYCLE_*}` substitution; the UI surfaces a "Required env vars on the loomcycle deployment" notice. Substrate live as of loomcycle v0.9.2 (PR #177).
+- **Helpers:** `capability.ts` (`requireLoomcycleVersion` + `parseSemver` + `semverGte` for forward-compat gating against future-feature additions) + `envVarHints.ts` (`extractEnvVarNames` / `extractEnvVarsFromHeaders` / `formatEnvVarHint` for the MCPServerDef Register UI hint).
+- **Tests:** +40 Vitest cases (12 AgentDef / 9 MCPServerDef / 19 capability+envVarHints), totalling 109 across 8 files.
+
+### Deferred (consistent with 2.1's Memory-write decision)
+
+- **Resource: Evaluation** — substrate has an in-band tool with submit/get/list_for_run/list_for_def/aggregate ops, but no admin endpoint. Lands when `@loomcycle/client` adds `evaluation()` analogous to `agentDef()`.
+- **Resource: Context** — same situation. Help / Self / Lineage / History are agent-internal; no admin surface.
+
+### Notes for operators
+
+- MCPServerDef Register defaults `promote: true` (typical "register and use" intent). Other Create / Fork ops default `promote: false` (caller explicitly Promotes after review).
+- The Headers fixed-collection accepts template strings; the n8n node never transmits plaintext credentials — only `${LOOMCYCLE_FOO}` references.
+
 ## [0.2.0] — 2026-05-22
 
 Sub-phase 2.1 — first action node. The umbrella `LoomCycle` node with three resources and ~14 operations against a live loomcycle ≥ v0.9.2.
