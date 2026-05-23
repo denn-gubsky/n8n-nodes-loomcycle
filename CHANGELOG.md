@@ -2,6 +2,43 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-23
+
+Sub-phase 2.3 — trigger nodes. n8n workflows can now START from loomcycle events. Also includes the **full code-review fix-up** for sub-phases 2.0–2.3 (9 review findings addressed in the same commit set; see "Code-review fixes" below).
+
+### Added
+
+- **`LoomCycle: Run Completed`** trigger — fires when an agent run reaches a terminal state (completed / failed / cancelled). Two transports:
+  - **SSE (default)** — persistent `streamUserRunStates` consumer with transparent reconnect on the substrate's 30-min server cap. `parentAgentId` filter + `debug` toggle forwarded; opt-in `Surface Stream Open/Close Events` parameter surfaces the synthetic `stream_close` meta-frames as `__meta: 'stream_close'` rows.
+  - **Polling fallback** — periodic `listUserAgents` calls with `workflowStaticData`-backed dedup. Use when the deployment can't sustain long-lived SSE (Cloudflare workers, naive nginx with `proxy_buffering on`, etc.).
+- **`LoomCycle: Channel Message`** trigger — fires per new message on a watched channel. Direct `subscribeChannel` long-poll (v0.9.2 Channel CRUD, PR #180). Two delivery modes:
+  - **Auto-ack (default)** — substrate auto-commits the cursor on a non-empty batch (at-most-once).
+  - **Peek + Explicit Ack** — `peekChannel` + emit + `ackChannel` after; cursor persisted in `workflowStaticData` (at-least-once, survives workflow crashes mid-processing).
+- **`nodes/LoomCycle/helpers/staticData.ts`** — typed wrappers for `getWorkflowStaticData('node')` (seen-set + cursor with bounded retention).
+- **Tests:** +18 Vitest cases across 3 new test files (sse + poll + subscribe), totalling 127 / 11 files.
+
+### Notes for operators
+
+- Both triggers honour the credential's `Default User ID` when the per-node parameter is empty.
+- Both triggers implement `manualTriggerFunction` so the n8n editor's "Listen for Test Event" button does a single one-shot listen.
+- The SSE trigger's reconnect backoff is exponential (capped at 4×). After 5 consecutive failures the loop gives up.
+
+### Code-review fixes (applied 2026-05-23)
+
+Full independent code review against sub-phases 2.0–2.3 surfaced 4 High + 1 Medium + 4 Low findings; all addressed:
+
+- **H1 — Bearer redaction in loadOptions fallback messages.** All three `loadOptions` methods now run the error string through `redactBearerFragments` before placing it in the dropdown's instructional placeholder. Closes a potential editor-UI leak path. Regression-tested.
+- **H2 — `ChannelCursorRegressionError` mapping.** Added a branch in `wrapLoomcycleError` mapping the 409 `channel_cursor_regression` typed error to a clear "Re-fetch the channel's committed cursor and retry" `NodeApiError`. Regression-tested.
+- **H3 — SSE loop `emitError` semantics.** Previously fired `emitError` on every reconnect attempt (1–4) and silently returned on attempt 5. Now suppresses errors during transient retries (normal for SSE — 30-min server cap, reverse-proxy drops, etc.) and fires `emitError` ONCE on the terminal give-up so n8n's trigger lifecycle deactivates instead of going silently deaf.
+- **H4 — `drainRunStream` unbounded memory.** Dropped the `events: AgentEvent[]` field from `RunDrainResult`. Long-running agent runs were inflating n8n's execution-record storage with thousands of frames. Downstream consumers wanting per-event visibility should use the RunCompleted trigger.
+- **M5 — Peek-ack loop bounded retry.** ChannelMessage trigger now gives up after 5 consecutive failures (e.g. permanent `ChannelCursorRegressionError`) instead of spinning forever at the backoff interval.
+- **L2 — Dead test fixtures removed.** `createMockClient()` + `MockClient` type removed from `_helpers.ts`; replaced with a comment explaining WHY each test file inlines its own `mockClient` (vi.mock hoisting).
+- **L3 — Unnecessary cast in `sse.ts`.** Removed `RunStateEvent` import + `as RunStateEvent['status'][]` cast — `statuses` is already typed `string[]` in `StreamUserRunStatesOptions`.
+- **L6 — Added SSE reconnect-after-clean-close test.** Guards against regressions of the `attempt = 0` counter reset that allows the loop to recover from transient drops without crossing into terminal give-up.
+- **L7 — Strict JSON parsing for Channel Publish payload.** `parseJsonField` gains an opt-in `strict: true` mode that throws `NodeOperationError` on invalid JSON instead of silently forwarding the raw string. Wired on the publish path.
+
+Test count: 109 → 136 (+27 new across 2.3 itself and the review additions). All gates remain clean (lint, typecheck, build).
+
 ## [0.3.0] — 2026-05-23
 
 Sub-phase 2.2 — substrate-admin resources. The umbrella `LoomCycle` node gains three new resources for versioned-definition management.

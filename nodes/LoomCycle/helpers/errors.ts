@@ -6,6 +6,7 @@ import {
 	AlreadyPausingError,
 	AuthError,
 	BackpressureError,
+	ChannelCursorRegressionError,
 	HookNotFoundError,
 	InvalidArgumentError,
 	LoomcycleError,
@@ -127,6 +128,16 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 		return new NodeApiError(node, jsonifyError(err), {
 			message: 'Runtime is already pausing or paused',
 			description: redactBearerFragments(err.bodyText ?? ''),
+			httpCode: '409',
+		});
+	}
+
+	if (err instanceof ChannelCursorRegressionError) {
+		return new NodeApiError(node, jsonifyError(err), {
+			message: 'Channel cursor regression — supplied cursor is older than the committed cursor',
+			description: redactBearerFragments(
+				err.bodyText ?? 'Re-fetch the channel\'s current committed cursor via subscribeChannel and retry the Ack.',
+			),
 			httpCode: '409',
 		});
 	}

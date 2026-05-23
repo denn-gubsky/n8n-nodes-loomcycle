@@ -6,6 +6,12 @@ import type { AgentEvent, Usage } from '@loomcycle/client';
  * Action nodes block their execute() until the run completes — long runs
  * are better expressed via the LoomCycleRunCompleted trigger (Sub-phase
  * 2.3). This shape is what the action node returns to downstream nodes.
+ *
+ * **No `events` array.** Long agent runs can emit thousands of frames;
+ * bundling them all into the result inflates n8n's execution-record
+ * storage and risks running the worker out of memory under bulk input.
+ * Downstream nodes that need event-level visibility should consume the
+ * SSE stream directly via the LoomCycleRunCompleted trigger.
  */
 export interface RunDrainResult {
 	finalText: string;
@@ -14,7 +20,6 @@ export interface RunDrainResult {
 	sessionId?: string;
 	agentId?: string;
 	runId?: string;
-	events: AgentEvent[];
 }
 
 /**
@@ -22,10 +27,10 @@ export interface RunDrainResult {
  *
  * `event: error` frames (or any frame with `is_error: true`) cause the
  * function to throw — the action node's `wrapLoomcycleError` catches and
- * surfaces them as NodeApiError. Other event types are accumulated.
+ * surfaces them as NodeApiError. Other event types fold into the compact
+ * summary returned.
  */
 export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise<RunDrainResult> {
-	const events: AgentEvent[] = [];
 	let finalText = '';
 	let usage: Usage | undefined;
 	let stopReason: string | undefined;
@@ -35,7 +40,6 @@ export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise
 	let errorMessage: string | undefined;
 
 	for await (const ev of stream) {
-		events.push(ev);
 		if (ev.type === 'text' && typeof ev.text === 'string') {
 			finalText += ev.text;
 		}
@@ -61,5 +65,5 @@ export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise
 		throw new Error(errorMessage);
 	}
 
-	return { finalText, usage, stopReason, sessionId, agentId, runId, events };
+	return { finalText, usage, stopReason, sessionId, agentId, runId };
 }

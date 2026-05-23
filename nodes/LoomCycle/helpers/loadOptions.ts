@@ -1,5 +1,17 @@
 import type { ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
 import { getClient, getCredentialDefault } from './client';
+import { redactBearerFragments } from './errors';
+
+/**
+ * Build the dropdown's instructional fallback option after a failed
+ * loadOptions call. The message MUST run through `redactBearerFragments`
+ * because the wire-error string can echo back server-side header fragments
+ * (CLAUDE.md §security.6 — the bearer never reaches operator UIs).
+ */
+function failedToLoadOption(label: string, err: unknown): INodePropertyOptions {
+	const msg = redactBearerFragments((err as Error).message ?? '');
+	return { name: `— failed to load ${label} (${msg}); type the name manually —`, value: '' };
+}
 
 /**
  * loadOptions methods for dynamic n8n parameter dropdowns.
@@ -34,12 +46,7 @@ export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodeProp
 		}
 		return names.map((name) => ({ name, value: name }));
 	} catch (err) {
-		return [
-			{
-				name: `— failed to load agents (${(err as Error).message}); type the name manually —`,
-				value: '',
-			},
-		];
+		return [failedToLoadOption('agents', err)];
 	}
 }
 
@@ -57,12 +64,7 @@ export async function loadChannels(this: ILoadOptionsFunctions): Promise<INodePr
 		}
 		return names.map((name) => ({ name, value: name }));
 	} catch (err) {
-		return [
-			{
-				name: `— failed to load channels (${(err as Error).message}); type the name manually —`,
-				value: '',
-			},
-		];
+		return [failedToLoadOption('channels', err)];
 	}
 }
 
@@ -79,11 +81,6 @@ export async function loadMemoryScopes(this: ILoadOptionsFunctions): Promise<INo
 		}
 		return names.map((name) => ({ name, value: name }));
 	} catch (err) {
-		return [
-			{
-				name: `— failed to load scopes (${(err as Error).message}); type the name manually —`,
-				value: '',
-			},
-		];
+		return [failedToLoadOption('scopes', err)];
 	}
 }

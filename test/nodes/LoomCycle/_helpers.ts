@@ -1,54 +1,20 @@
 import type { IExecuteFunctions, ILoadOptionsFunctions, INode } from 'n8n-workflow';
-import { vi } from 'vitest';
 import type { AgentEvent } from '@loomcycle/client';
 
 /**
  * Shared fixtures for LoomCycle node tests.
  *
- * The umbrella `@loomcycle/client` module is mocked at test-module load
- * time via vi.mock(...) in each test file (the call must live there
- * because vi.mock is hoisted per-file). The MOCK_CLIENT instance
- * exported below is the shared backing object the mock returns; tests
- * configure its method-level vi.fn() mocks before invoking execute().
+ * NOTE: The mock LoomcycleClient shape is duplicated inline in each test
+ * file (inside a `vi.hoisted()` block) because `vi.mock(...)` calls are
+ * auto-hoisted ABOVE imports — so the mock has to be created at hoist
+ * time, before any cross-file factory could run. A shared
+ * `createMockClient()` here would only be reachable AFTER imports, which
+ * is too late. Each test file owns its own `mockClient` literal.
+ *
+ * This file exports the cross-test fixtures that DON'T depend on
+ * hoisting: makeExecuteContext, makeLoadOptionsContext, asAsyncIterable,
+ * fakeSuccessfulRunEvents.
  */
-
-export type MockClient = {
-	runStreaming: ReturnType<typeof vi.fn>;
-	continueSession: ReturnType<typeof vi.fn>;
-	getAgent: ReturnType<typeof vi.fn>;
-	cancelAgent: ReturnType<typeof vi.fn>;
-	listUserAgents: ReturnType<typeof vi.fn>;
-	listMemoryScopes: ReturnType<typeof vi.fn>;
-	listMemoryScopeIDs: ReturnType<typeof vi.fn>;
-	listMemoryEntries: ReturnType<typeof vi.fn>;
-	getMemoryEntry: ReturnType<typeof vi.fn>;
-	listChannels: ReturnType<typeof vi.fn>;
-	publishChannel: ReturnType<typeof vi.fn>;
-	subscribeChannel: ReturnType<typeof vi.fn>;
-	peekChannel: ReturnType<typeof vi.fn>;
-	ackChannel: ReturnType<typeof vi.fn>;
-	health: ReturnType<typeof vi.fn>;
-};
-
-export function createMockClient(): MockClient {
-	return {
-		runStreaming: vi.fn(),
-		continueSession: vi.fn(),
-		getAgent: vi.fn(),
-		cancelAgent: vi.fn(),
-		listUserAgents: vi.fn(),
-		listMemoryScopes: vi.fn(),
-		listMemoryScopeIDs: vi.fn(),
-		listMemoryEntries: vi.fn(),
-		getMemoryEntry: vi.fn(),
-		listChannels: vi.fn(),
-		publishChannel: vi.fn(),
-		subscribeChannel: vi.fn(),
-		peekChannel: vi.fn(),
-		ackChannel: vi.fn(),
-		health: vi.fn(),
-	};
-}
 
 interface ExecuteContextOptions {
 	params: Record<string, unknown>;

@@ -105,6 +105,21 @@ describe('LoomCycle resource=channel', () => {
 			expect(mockClient.publishChannel.mock.calls[0][1].userId).toBe('cred-u');
 		});
 
+		it('throws NodeOperationError on invalid JSON payload (strict mode)', async () => {
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'channel',
+					operation: 'publish',
+					channel: 'events',
+					scope: 'global',
+					payload: 'this is not json {',
+				},
+			});
+			await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+			expect(mockClient.publishChannel).not.toHaveBeenCalled();
+		});
+
 		it('throws NodeOperationError when scope=user and no userId resolvable', async () => {
 			const node = new LoomCycle();
 			const ctx = makeExecuteContext({

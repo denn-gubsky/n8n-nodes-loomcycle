@@ -285,7 +285,11 @@ async function executeChannel(
 
 	if (operation === 'publish') {
 		const rawPayload = this.getNodeParameter('payload', i, '{}') as unknown;
-		const payload = parseJsonField(rawPayload);
+		// Strict JSON: a Channel publish payload that isn't a valid JSON
+		// value (object/array/string/number) would land server-side as a
+		// raw string — confusing for downstream consumers expecting
+		// structured data. Throw early so the operator sees the typo.
+		const payload = parseJsonField(rawPayload, { strict: true, node: this.getNode() });
 		const deliverAt = this.getNodeParameter('deliverAt', i, '') as string;
 		const resp = await client.publishChannel(channel, {
 			scope,
@@ -452,13 +456,20 @@ function parseCsv(raw: unknown): string[] | undefined {
 	return items.length > 0 ? items : undefined;
 }
 
-function parseJsonField(raw: unknown): unknown {
+function parseJsonField(
+	raw: unknown,
+	opts: { strict?: boolean; node?: import('n8n-workflow').INode } = {},
+): unknown {
 	if (typeof raw !== 'string') return raw;
 	const trimmed = raw.trim();
 	if (trimmed === '') return {};
 	try {
 		return JSON.parse(trimmed);
-	} catch {
+	} catch (err) {
+		if (opts.strict && opts.node) {
+			const snippet = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+			throw new NodeOperationError(opts.node, `Invalid JSON: ${snippet} — ${(err as Error).message}`);
+		}
 		return raw;
 	}
 }
