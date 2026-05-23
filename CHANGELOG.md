@@ -2,6 +2,32 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-23
+
+Sub-phase 2.4 — **cluster sub-nodes**. n8n's AI Agent can now reach into loomcycle through 4 new tools.
+
+### Added
+
+- **`LoomCycle Memory Tool`** — discriminated tool exposing the 4 Memory read ops (listScopes / listScopeIDs / listEntries / getEntry). The agent calls it with `{op, scope?, scopeID?, key?, prefix?, limit?}`.
+- **`LoomCycle Channel Tool`** — exposes Channel `publish` + `peek` ops with `scope: global|user`. Subscribe stays a trigger; Ack stays the action node.
+- **`LoomCycle Sub-Agent Tool`** — delegates the parent AI Agent's tool-call to a configured loomcycle agent via `runStreaming`, returns the drained `finalText`. Defaults `treatPromptAsUntrusted: true` (the prompt comes from a model).
+- **`LoomCycle MCP Server Tool` — strategic differentiator.** On `supplyData`: refuses stdio transport → idempotent ensure (`get` then `create` on `NotFoundError`) → returns a tool that, when invoked, spawns the configured loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. **`cleanupOnEnd: false` default** (locked design); opt-in retire-on-workflow-end via `closeFunction`. Env-var hints (`${LOOMCYCLE_*}` tokens in headers) logged for operator visibility.
+- **`nodes/_shared/clusterTool.ts`** — `buildTool({name, description, schema, fn})` helper. Wraps `DynamicStructuredTool` from `@langchain/core/tools`. Errors thrown inside the tool's `fn` are caught, redacted (CLAUDE.md §security.6), and returned as `{error: "..."}` JSON strings so the parent agent reads the failure mode without leaking bearer fragments into its context.
+- **+ tests** — 26 new Vitest cases (`memoryTool`, `channelTool`, `subAgentTool`, `mcpServerTool`). Total: **162 / 16 files**.
+
+### Dependencies
+
+- `@langchain/core` (peer + dev) — LangChain's `DynamicStructuredTool` is the canonical n8n AI Agent tool contract.
+- `zod` (peer + dev) — input-schema validation on the tool callbacks.
+
+n8n provides both at runtime; we peer-depend so we don't ship duplicate copies.
+
+### Notes for operators
+
+- Each cluster sub-node carries a `Tool Name` parameter; this must be **unique across sibling sub-nodes** under the same AI Agent.
+- The MCP Server Tool's `cleanupOnEnd: false` default means an MCP registration survives workflow re-executions. Flip the toggle if you want per-execution-scoped registrations (e.g. for ephemeral teams).
+- Memory writes (set/delete/search) remain deferred until `@loomcycle/client` exposes admin write endpoints — consistent with the 2.1 / 2.2 deferral pattern (no one-shot-agent workarounds).
+
 ## [0.4.0] — 2026-05-23
 
 Sub-phase 2.3 — trigger nodes. n8n workflows can now START from loomcycle events. Also includes the **full code-review fix-up** for sub-phases 2.0–2.3 (9 review findings addressed in the same commit set; see "Code-review fixes" below).

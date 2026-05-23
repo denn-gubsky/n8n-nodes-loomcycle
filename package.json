@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-loomcycle",
-	"version": "0.4.0",
-	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.3 adds trigger nodes: LoomCycleRunCompleted (SSE + polling fallback) and LoomCycleChannelMessage (long-poll subscribe with at-least-once option).",
+	"version": "0.5.0",
+	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.4 adds 4 cluster sub-nodes that plug into n8n's AI Agent: Memory Tool, Channel Tool, Sub-Agent Tool, and the strategic differentiator MCP Server Tool (dynamic MCP server provisioning).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -50,16 +50,23 @@
 		"nodes": [
 			"dist/nodes/LoomCycle/LoomCycle.node.js",
 			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
-			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js"
+			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js",
+			"dist/nodes/LoomCycleMemoryTool/LoomCycleMemoryTool.node.js",
+			"dist/nodes/LoomCycleChannelTool/LoomCycleChannelTool.node.js",
+			"dist/nodes/LoomCycleSubAgentTool/LoomCycleSubAgentTool.node.js",
+			"dist/nodes/LoomCycleMcpServerTool/LoomCycleMcpServerTool.node.js"
 		]
 	},
 	"dependencies": {
 		"@loomcycle/client": "^0.9.2"
 	},
 	"peerDependencies": {
-		"n8n-workflow": ">=1.82.0 <2.0.0"
+		"@langchain/core": ">=0.3.0",
+		"n8n-workflow": ">=1.82.0 <2.0.0",
+		"zod": ">=3.22.0"
 	},
 	"devDependencies": {
+		"@langchain/core": "^0.3.0",
 		"@types/node": "^20.14.0",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",
 		"@typescript-eslint/parser": "^7.18.0",
@@ -70,6 +77,7 @@
 		"n8n-workflow": "^1.82.0",
 		"prettier": "^3.3.0",
 		"typescript": "^5.4.0",
-		"vitest": "^3.0.0"
+		"vitest": "^3.0.0",
+		"zod": "^3.22.0"
 	}
 }
