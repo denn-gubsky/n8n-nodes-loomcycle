@@ -43,6 +43,19 @@ module.exports = {
 			},
 		},
 		{
+			// Cluster sub-nodes throw plain Error() from inside LangChain
+			// tool callbacks; buildTool() catches + JSON-stringifies into
+			// the tool's return value, so the throws never reach n8n's
+			// error infrastructure. The `execute-block-wrong-error-thrown`
+			// rule's prescription (NodeOperationError / NodeApiError)
+			// doesn't apply here.
+			files: ['nodes/LoomCycle*Tool/**/*.ts'],
+			plugins: ['eslint-plugin-n8n-nodes-base'],
+			rules: {
+				'n8n-nodes-base/node-execute-block-wrong-error-thrown': 'off',
+			},
+		},
+		{
 			files: ['package.json'],
 			plugins: ['eslint-plugin-n8n-nodes-base'],
 			extends: ['plugin:n8n-nodes-base/community'],
