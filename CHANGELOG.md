@@ -2,6 +2,28 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-23
+
+Patch release. **Fixes install on n8n's CommonJS community-node loader** (reported on self-hosted n8n / TrueNAS as: `No "exports" main defined in @loomcycle/client/package.json`).
+
+### Fixed
+
+- **CJS interop with `@loomcycle/client`**. Bumped pin from `^0.9.2` → `^0.10.1`. The adapter v0.10.1 ships as a dual ESM + CommonJS distribution ([loomcycle PR #196](https://github.com/denn-gubsky/loomcycle/pull/196)) — n8n's `require()`-based loader now resolves it cleanly. ESM consumers continue to use the same import path; this is strictly additive on the adapter side.
+
+### Internal
+
+- `nodes/_shared/clusterTool.ts` — narrowed-then-widened the schema generic to break `@langchain/core@0.3.80`'s `DynamicStructuredTool<T>` recursion (TS2589 "Type instantiation is excessively deep"). Runtime behaviour unchanged; covered by the 26 cluster-sub-node test cases.
+- `.eslintrc.js` — registered the `@typescript-eslint` plugin (parser was already configured; just needed the plugin name registered so `eslint-disable-next-line @typescript-eslint/no-explicit-any` comments resolve).
+- Tarball size: 96.6 kB / 99 files (was 62 kB pre-bump — increase from the fresh `@langchain/core@0.3.80` peer dep being slightly heavier in dev-tree resolution; published tarball still excludes peer deps).
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` 200 passing + 4 skipped (same surface as 1.0.0)
+- `npm run build` produces all 7 node paths
+- `npm pack --dry-run` packs cleanly
+
 ## [1.0.0] — 2026-05-23
 
 **First stable release.** Sub-phase 2.6 of [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). All of Phase 2 (Sub-phases 2.0 through 2.5) is now bundled under one stable major version + this package is ready for the n8n community-node directory.

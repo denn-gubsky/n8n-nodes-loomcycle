@@ -8,6 +8,11 @@ module.exports = {
 		es2020: true,
 	},
 	parser: '@typescript-eslint/parser',
+	// Register the @typescript-eslint plugin so its rule names (e.g.
+	// `no-explicit-any`) are recognised by inline `eslint-disable-next-line`
+	// comments. We don't extend any of its rulesets — n8n-nodes-base/* is
+	// our actual ruleset — so this is just for inline-disable lookup.
+	plugins: ['@typescript-eslint'],
 	parserOptions: {
 		project: ['./tsconfig.json'],
 		sourceType: 'module',
