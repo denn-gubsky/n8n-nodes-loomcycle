@@ -6,6 +6,14 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 
 **First stable release.** Sub-phase 2.6 of [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). All of Phase 2 (Sub-phases 2.0 through 2.5) is now bundled under one stable major version + this package is ready for the n8n community-node directory.
 
+### Pre-publish: renamed to scoped `@loomcycle/n8n-nodes-loomcycle`
+
+Before first npm publish, the package was renamed from the original unscoped `n8n-nodes-loomcycle` to the scoped `@loomcycle/n8n-nodes-loomcycle`. The scoped name groups the package alongside [`@loomcycle/client`](https://www.npmjs.com/package/@loomcycle/client) under the same `@loomcycle` npm organisation — same maintainer, same trust boundary, easier multi-maintainer publish access. **No operator migration needed** — the unscoped name was never published.
+
+Codex registration in every `*.node.json` updated accordingly (`"node": "@loomcycle/n8n-nodes-loomcycle.<nodeId>"`). The example workflow JSONs in `examples/` use the new `type: "@loomcycle/n8n-nodes-loomcycle.*"` prefix. The schema-validation test now reads the package name from `package.json` instead of hard-coding the prefix, so future renames (if any) only touch one file.
+
+This supersedes the RFC's original unscoped lock; the locking rationale changed mid-development (recognised that `@loomcycle/*` org cohesion + multi-maintainer org-publish ergonomics outweigh the slightly-longer install name).
+
 ### What's in 1.0.0
 
 The cumulative shape from the 6 sub-phases:

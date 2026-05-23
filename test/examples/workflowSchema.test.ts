@@ -53,17 +53,28 @@ function loadWorkflow(filename: string): Workflow {
  * package.json `n8n.nodes[]`. Examples must only reference these
  * (plus core / langchain / n8n-base types).
  */
+/**
+ * Returns `<package-name>` from package.json. Used as the prefix on every
+ * declared node type. Reads at test time so the rename from
+ * `n8n-nodes-loomcycle` → `@loomcycle/n8n-nodes-loomcycle` (or any future
+ * rename) doesn't require touching this test.
+ */
+function packageNamePrefix(): string {
+	return (packageJson as unknown as { name: string }).name;
+}
+
 function declaredLoomcycleNodeTypes(): Set<string> {
 	const nodes = (packageJson as unknown as { n8n: { nodes: string[] } }).n8n.nodes;
+	const prefix = packageNamePrefix();
 	const out = new Set<string>();
 	for (const distPath of nodes) {
-		// dist/nodes/<Name>/<Name>.node.js → 'n8n-nodes-loomcycle.<name>'
+		// dist/nodes/<Name>/<Name>.node.js → '<package>.<nodeId>'
 		const match = distPath.match(/dist\/nodes\/([^/]+)\//);
 		if (!match) continue;
 		// Conform to n8n convention: first letter lowercased
 		const className = match[1];
 		const nodeId = className.charAt(0).toLowerCase() + className.slice(1);
-		out.add(`n8n-nodes-loomcycle.${nodeId}`);
+		out.add(`${prefix}.${nodeId}`);
 	}
 	return out;
 }
@@ -119,10 +130,11 @@ describe('examples/ — every workflow JSON', () => {
 				}
 			});
 
-			it('every `n8n-nodes-loomcycle.*` type is declared in package.json n8n.nodes[]', () => {
+			it('every loomcycle node type is declared in package.json n8n.nodes[]', () => {
 				const declared = declaredLoomcycleNodeTypes();
+				const prefix = `${packageNamePrefix()}.`;
 				for (const node of wf.nodes) {
-					if (!node.type.startsWith('n8n-nodes-loomcycle.')) continue;
+					if (!node.type.startsWith(prefix)) continue;
 					expect(declared.has(node.type)).toBe(true);
 				}
 			});

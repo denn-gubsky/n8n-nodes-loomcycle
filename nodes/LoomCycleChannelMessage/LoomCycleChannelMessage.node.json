@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-loomcycle.loomCycleChannelMessage",
+	"node": "@loomcycle/n8n-nodes-loomcycle.loomCycleChannelMessage",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["AI"],

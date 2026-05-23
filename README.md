@@ -3,7 +3,7 @@
 Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime — design and operate loomcycle agents directly from n8n's visual builder.
 
 [![CI](https://github.com/denn-gubsky/n8n-nodes-loomcycle/workflows/ci/badge.svg)](https://github.com/denn-gubsky/n8n-nodes-loomcycle/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/n8n-nodes-loomcycle)](https://www.npmjs.com/package/n8n-nodes-loomcycle)
+[![npm](https://img.shields.io/npm/v/@loomcycle/n8n-nodes-loomcycle)](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
@@ -12,10 +12,12 @@ This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integrati
 
 ```bash
 # In your n8n Settings → Community Nodes → Install:
-n8n-nodes-loomcycle
+@loomcycle/n8n-nodes-loomcycle
 ```
 
 Once installed, configure the **LoomCycle API** credential with your loomcycle deployment's bearer token + base URL.
+
+The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) npm org alongside [`@loomcycle/client`](https://www.npmjs.com/package/@loomcycle/client) — same trust boundary, same maintainer.
 
 ## What's in the box
 
@@ -114,7 +116,7 @@ npm link
 
 # In your n8n install (e.g. ~/.n8n/nodes):
 cd ~/.n8n/nodes
-npm link n8n-nodes-loomcycle
+npm link @loomcycle/n8n-nodes-loomcycle
 
 # Then restart n8n. The 7 nodes appear under the "LoomCycle" prefix in
 # the node picker.
@@ -143,7 +145,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^0.9.2`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `n8n-nodes-loomcycle` major bump.
+This package pins `@loomcycle/client` to `^0.9.2`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump.
 
 ## Troubleshooting
 

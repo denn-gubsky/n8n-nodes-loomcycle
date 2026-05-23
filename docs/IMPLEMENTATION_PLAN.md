@@ -372,7 +372,7 @@ export class LoomCycleMcpServerTool implements INodeType {
 
 ## Sub-phase 2.6 — Docs + npm publish + community-node submission
 
-**Goal:** publish `n8n-nodes-loomcycle@1.0.0` to npm + submit to n8n's community-node directory.
+**Goal:** publish `@loomcycle/n8n-nodes-loomcycle@1.0.0` to npm + submit to n8n's community-node directory.
 
 **Files to create/modify:**
 
@@ -389,7 +389,7 @@ export class LoomCycleMcpServerTool implements INodeType {
 
 **Open questions:**
 1. Publish `1.0.0-rc1` for one-week soak before stable + directory PR. Recommend yes.
-2. npm scope — RFC locks unscoped `n8n-nodes-loomcycle`. Honour the lock.
+2. npm scope — **Decision revised pre-publish: scoped `@loomcycle/n8n-nodes-loomcycle`** to group with `@loomcycle/client`. The RFC's original unscoped lock is superseded; see CHANGELOG 1.0.0.
 
 ## Risk register
 
@@ -407,7 +407,7 @@ export class LoomCycleMcpServerTool implements INodeType {
 
 | Dimension | Convention |
 |---|---|
-| npm package name | `n8n-nodes-loomcycle` (no scope; RFC-locked) |
+| npm package name | `@loomcycle/n8n-nodes-loomcycle` (scoped to `@loomcycle` org; superseded the original RFC's unscoped lock before first publish — see CHANGELOG 1.0.0 §"Pre-publish: renamed to scoped") |
 | Credential `name` | `loomCycleApi` (camelCase) |
 | Credential fields | `baseUrl`, `bearerToken`, `userId`, `userTier`, `mcpUrl` |
 | Node display names | `LoomCycle`, `LoomCycle: Run Completed`, `LoomCycle: Channel Message`, `LoomCycle Memory Tool`, `LoomCycle Channel Tool`, `LoomCycle Sub-Agent Tool`, `LoomCycle Context Help Tool`, `LoomCycle MCP Server Tool` |

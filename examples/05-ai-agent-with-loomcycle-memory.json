@@ -29,7 +29,7 @@
 		{
 			"id": "node-memory-tool",
 			"name": "LoomCycle Memory Tool",
-			"type": "n8n-nodes-loomcycle.loomCycleMemoryTool",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleMemoryTool",
 			"typeVersion": 1,
 			"position": [600, 500],
 			"parameters": {
@@ -46,7 +46,7 @@
 		{
 			"id": "node-subagent-tool",
 			"name": "LoomCycle Researcher (Sub-Agent)",
-			"type": "n8n-nodes-loomcycle.loomCycleSubAgentTool",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleSubAgentTool",
 			"typeVersion": 1,
 			"position": [800, 500],
 			"parameters": {

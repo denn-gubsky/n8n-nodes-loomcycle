@@ -31,7 +31,7 @@
 		{
 			"id": "node-research",
 			"name": "LoomCycle Researcher",
-			"type": "n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
 			"typeVersion": 1,
 			"position": [600, 300],
 			"parameters": {
@@ -51,7 +51,7 @@
 		{
 			"id": "node-summarise",
 			"name": "LoomCycle Summariser",
-			"type": "n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
 			"typeVersion": 1,
 			"position": [800, 300],
 			"parameters": {
@@ -71,7 +71,7 @@
 		{
 			"id": "node-publish",
 			"name": "Publish to Channel",
-			"type": "n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
 			"typeVersion": 1,
 			"position": [1000, 300],
 			"parameters": {

@@ -151,7 +151,7 @@ The RFC fixes the build order. Each sub-phase is one PR / one release.
 
 | Sub-phase | Scope | Output |
 |---|---|---|
-| **2.0** | Repo scaffolding (package.json with `n8n-workflow` peer dep, tsconfig, CI), `LoomCycleApi` credential type with `/healthz` test, `@loomcycle/client` wired up | One credential type; green CI; `npm install n8n-nodes-loomcycle` works in a local n8n |
+| **2.0** | Repo scaffolding (package.json with `n8n-workflow` peer dep, tsconfig, CI), `LoomCycleApi` credential type with `/healthz` test, `@loomcycle/client` wired up | One credential type; green CI; `npm install @loomcycle/n8n-nodes-loomcycle` works in a local n8n |
 | **2.1** | Action nodes: Run, Memory, Channel | 3 node files, ~12 operations; auto-discovery dropdowns for agent / channel |
 | **2.2** | Action nodes: AgentDef, Evaluation, Context | 3 more node files, ~12 more operations |
 | **2.3** | Trigger nodes: `LoomCycle: Run Completed`, `LoomCycle: Channel Message` | SSE transport (primary, via `client.streamUserRunStates`) + polling fallback; n8n lifecycle hooks for connection management |
