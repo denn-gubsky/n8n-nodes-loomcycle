@@ -28,19 +28,20 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { loadAgents, loadChannels, loadMemoryScopes } from '../../../nodes/LoomCycle/helpers/loadOptions';
+import { loadRecentAgentNames, loadChannels, loadMemoryScopes } from '../../../nodes/LoomCycle/helpers/loadOptions';
 import { makeLoadOptionsContext } from './_helpers';
 
 describe('loadOptions — SECURITY: error messages are bearer-redacted before reaching the UI', () => {
-	it('loadAgents redacts Bearer fragments from the error message', async () => {
+	it('loadRecentAgentNames redacts Bearer fragments from the error message', async () => {
 		mockClient.listUserAgents.mockRejectedValue(
 			new Error('Server returned: Authorization: Bearer sk-ant-leaked-token-12345 401'),
 		);
 		const ctx = makeLoadOptionsContext({ credentials: { userId: 'u1' } });
-		const out = await loadAgents.call(ctx);
+		const out = await loadRecentAgentNames.call(ctx);
 		const surface = JSON.stringify(out);
 		expect(surface).not.toContain('sk-ant-leaked-token-12345');
 		expect(surface).toContain('[REDACTED]');
+		expect(surface).toContain('recent agent names');
 	});
 
 	it('loadChannels redacts Bearer fragments from the error message', async () => {
@@ -63,9 +64,9 @@ describe('loadOptions — SECURITY: error messages are bearer-redacted before re
 		expect(surface).toContain('[REDACTED]');
 	});
 
-	it('loadAgents returns the "no userId" placeholder when credentials lack a Default User ID', async () => {
+	it('loadRecentAgentNames returns the "no userId" placeholder when credentials lack a Default User ID', async () => {
 		const ctx = makeLoadOptionsContext({});
-		const out = await loadAgents.call(ctx);
+		const out = await loadRecentAgentNames.call(ctx);
 		expect(out).toHaveLength(1);
 		expect(out[0].name).toContain('Default User ID');
 	});

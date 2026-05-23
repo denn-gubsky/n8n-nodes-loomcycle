@@ -24,16 +24,28 @@ function failedToLoadOption(label: string, err: unknown): INodePropertyOptions {
  */
 
 /**
- * List agent names currently active for the credential's default user_id.
- * Returns recent / running agent definitions visible via /v1/users/{id}/agents.
+ * Suggest agent names from this user's recent run history.
+ *
+ * NOTE: this is a HINT only, not a full library list. Loomcycle has no
+ * wire endpoint that returns the agent library (yaml-defined +
+ * AgentDef-registered names). The closest read is /v1/users/{id}/agents,
+ * which lists running / recently-completed *instances* — we de-dup by
+ * agent name and surface that as a "names you've used before"
+ * suggestion. Brand-new yaml agents that haven't been spawned yet will
+ * NOT appear; operators must type the name manually for those.
+ *
+ * Tracking the full-library endpoint as a Phase 0 follow-up
+ * (GET /v1/_agents in loomcycle).
  */
-export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+export async function loadRecentAgentNames(
+	this: ILoadOptionsFunctions,
+): Promise<INodePropertyOptions[]> {
 	try {
 		const userId = await getCredentialDefault(this, 'userId');
 		if (!userId) {
 			return [
 				{
-					name: '— set Default User ID on the credential to enable dropdown, or type the agent name manually —',
+					name: '— set Default User ID on the credential to enable suggestions, or type the agent name manually —',
 					value: '',
 				},
 			];
@@ -42,11 +54,16 @@ export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodeProp
 		const agents = await client.listUserAgents(userId);
 		const names = Array.from(new Set(agents.map((a) => a.agent))).sort();
 		if (names.length === 0) {
-			return [{ name: '— no running agents for this user; type the agent name manually —', value: '' }];
+			return [
+				{
+					name: '— no recent runs for this user; type the agent name from your loomcycle.yaml or AgentDef registry —',
+					value: '',
+				},
+			];
 		}
 		return names.map((name) => ({ name, value: name }));
 	} catch (err) {
-		return [failedToLoadOption('agents', err)];
+		return [failedToLoadOption('recent agent names', err)];
 	}
 }
 

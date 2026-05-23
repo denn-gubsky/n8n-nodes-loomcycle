@@ -12,7 +12,7 @@ import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
 import { buildSegments } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
-import { loadAgents, loadChannels, loadMemoryScopes } from './helpers/loadOptions';
+import { loadRecentAgentNames, loadChannels, loadMemoryScopes } from './helpers/loadOptions';
 import {
 	runOps,
 	memoryOps,
@@ -73,7 +73,7 @@ export class LoomCycle implements INodeType {
 
 	methods = {
 		loadOptions: {
-			loadAgents,
+			loadRecentAgentNames,
 			loadChannels,
 			loadMemoryScopes,
 		},

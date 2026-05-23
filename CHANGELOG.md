@@ -2,6 +2,35 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-05-23
+
+Patch release. **Fixes misleading dropdown semantics on `LoomCycle → Run → Spawn`**.
+
+### Fixed
+
+- **`Spawn → Agent` field**: was labeled "Agent Name or ID" with a dropdown loaded by `loadAgents`, which called `listUserAgents(userId)` — that endpoint returns *running / recently-completed instances* for one user, not the agent library. Brand-new yaml-defined agents that haven't been spawned yet never appeared, misleading operators into thinking the library was empty. The dropdown is now relabeled "Agent Name" and described honestly as a *recent-runs suggestion* (de-duplicated agent names from this user's run history). The field description explicitly points operators to `loomcycle.yaml` and the `LoomCycle → Agent Definition → List` action for discovering registered names.
+- Renamed the helper `loadAgents` → `loadRecentAgentNames` to match its actual behaviour. The previous name implied "list all available agents" which loomcycle's current wire API can't deliver.
+
+### Known limitation (tracked for a future upstream loomcycle PR)
+
+Loomcycle has no `GET /v1/_agents` endpoint that lists the full agent library (yaml-defined + AgentDef-registered names). The closest reads are:
+
+- `GET /v1/users/{user_id}/agents` — running instances for a user (what we use as a "recent" suggestion)
+- `agentDef({op: "list", name: X})` — requires a name, returns versions of *one* agent
+
+A proper library dropdown depends on either of:
+1. A new `GET /v1/_agents` route returning `{ agents: [{ name, source: "static" | "dynamic", description? }, ...] }`
+2. Extending `agentDef({op: "list"})` to accept empty `name` and return all distinct active rows (including yaml-bootstrapped)
+
+Either fix would let `loadRecentAgentNames` be replaced by `loadAgentLibrary`. Filed as a Phase 0 follow-up — see [`doc-internal/n8n-comparison.md`](https://github.com/denn-gubsky/loomcycle-internal).
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 200 passing + 4 skipped
+- `npm run build` produces all 7 node paths
+
 ## [1.0.2] — 2026-05-23
 
 Patch release. **Fixes node-picker visibility on n8n 2.x** (reported as: package loads cleanly, all 7 nodes register, Community Nodes panel shows green check, but `LoomCycle`, `LoomCycle: Run Completed`, and `LoomCycle: Channel Message` don't appear when searched in the workflow canvas's general node-picker / trigger-picker).

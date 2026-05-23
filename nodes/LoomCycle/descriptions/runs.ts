@@ -62,12 +62,12 @@ export const runOps: INodeProperties[] = [
 		displayName: 'Agent Name or ID',
 		name: 'agent',
 		type: 'options',
-		typeOptions: { loadOptionsMethod: 'loadAgents' },
+		typeOptions: { loadOptionsMethod: 'loadRecentAgentNames' },
 		default: '',
 		required: true,
 		displayOptions: { show: { resource: ['run'], operation: ['spawn'] } },
 		description:
-			'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
+			'Agent name to spawn (defined in loomcycle.yaml or AgentDef registry). The dropdown suggests names from your recent runs only — brand-new agents will not appear. For never-run agents, switch to <a href="https://docs.n8n.io/code/expressions/">Expression</a> mode and type the name; or list registered agents via <code>LoomCycle → Agent Definition → List</code>.',
 	},
 	{
 		displayName: 'Prompt',
