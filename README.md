@@ -2,24 +2,186 @@
 
 Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime — design and operate loomcycle agents directly from n8n's visual builder.
 
-## Status — Sub-phase 2.0 (scaffolding)
+[![CI](https://github.com/denn-gubsky/n8n-nodes-loomcycle/workflows/ci/badge.svg)](https://github.com/denn-gubsky/n8n-nodes-loomcycle/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/n8n-nodes-loomcycle)](https://www.npmjs.com/package/n8n-nodes-loomcycle)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-This package is in active development. **Not yet on npm.** The current release (`0.1.0`) ships the package scaffolding + a single `LoomCycle API` credential type with a `/healthz` test. Action nodes, trigger nodes, and cluster sub-nodes land in Sub-phases 2.1 through 2.4; the first public npm release is Sub-phase 2.6.
+This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
 
-See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) for the full sub-phase plan and [`CLAUDE.md`](CLAUDE.md) for development conventions.
+## Quick install
 
-## What this package will offer (at 1.0.0)
+```bash
+# In your n8n Settings → Community Nodes → Install:
+n8n-nodes-loomcycle
+```
 
-- **Action nodes** — umbrella `LoomCycle` node with 7 resource groups: Run, Memory, Channel, AgentDef, Evaluation, Context, MCPServerDef. ~40 operations total.
-- **Trigger nodes** — `LoomCycle: Run Completed` (SSE + polling fallback) and `LoomCycle: Channel Message` (long-poll subscribe).
-- **Cluster sub-nodes** — 5 sub-nodes pluggable into n8n's AI Agent: Memory Tool, Channel Tool, Sub-Agent Tool, Context Help Tool, **MCP Server Tool** (dynamic provisioning).
-- **Example workflows** — 6 importable JSONs covering canonical composition patterns.
+Once installed, configure the **LoomCycle API** credential with your loomcycle deployment's bearer token + base URL.
 
-## Requirements
+## What's in the box
 
-- n8n `>= 1.82.0 < 2.0.0`
-- Node `>= 20.15`
-- A running loomcycle deployment `>= 0.9.2` reachable from your n8n instance
+Seven nodes plus one credential type.
+
+### Credential
+
+- **LoomCycle API** — bearer token + base URL + optional Default User ID / User Tier / MCP URL. The credential test hits `GET /healthz`.
+
+### Action node (umbrella)
+
+- **LoomCycle** — single multi-resource node covering six op groups:
+  - **Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
+  - **Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` (read-only; writes deferred until adapter exposes them)
+  - **Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels`
+  - **Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
+  - **Skill Definition** — same 7 ops as AgentDef, applied to skills
+  - **MCP Server Definition** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
+
+### Trigger nodes
+
+- **LoomCycle: Run Completed** — fires when an agent run reaches a terminal state. SSE primary with polling fallback for proxy-hostile deployments. Honours `parentAgentId` + `debug` filters from the adapter.
+- **LoomCycle: Channel Message** — long-poll subscribe with two delivery modes: `auto-ack` (at-most-once) and `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
+
+### Cluster sub-nodes (plug into n8n's AI Agent)
+
+- **LoomCycle Memory Tool** — exposes Memory read ops as a single discriminated tool the AI Agent can call.
+- **LoomCycle Channel Tool** — Channel publish + peek as agent tools.
+- **LoomCycle Sub-Agent Tool** — delegates to a configured loomcycle agent (drains `runStreaming`); the agent receives the parent's tool-call prompt and returns its `finalText`.
+- **LoomCycle MCP Server Tool** — **strategic differentiator.** Drag onto a canvas → the substrate auto-registers the MCP server via `MCPServerDef` (idempotent ensure: `get` → `create` on `NotFoundError`) → returns a tool that spawns a loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. `cleanupOnEnd: false` default — registrations persist across executions for stable agentic teams.
+
+## Configure the credential
+
+In n8n, navigate to **Settings → Credentials → New** and pick **LoomCycle API**.
+
+| Field | Required | Notes |
+|---|---|---|
+| Base URL | yes | e.g. `http://127.0.0.1:8787` |
+| Bearer Token | yes | Matches loomcycle's `LOOMCYCLE_AUTH_TOKEN` env var |
+| Default User ID | no | Falls through to any node where `userId` is left empty |
+| Default User Tier | no | Same fall-through |
+| MCP URL (optional) | no | Only needed if you reference loomcycle's MCP server from n8n's MCP Client Tool sub-node (Vector 1) |
+
+Click **Test** → expect a green checkmark when the deployment is reachable. Behind the scenes: `GET /healthz` with `Authorization: Bearer <token>`.
+
+## Examples
+
+Six importable workflow JSONs in [`examples/`](examples/) cover the canonical patterns:
+
+| # | File | Pattern |
+|---|---|---|
+| 01 | [`01-multi-agent-research.json`](examples/01-multi-agent-research.json) | Researcher → summariser → channel digest |
+| 02 | [`02-slack-loomcycle-slack.json`](examples/02-slack-loomcycle-slack.json) | Slack trigger → loomcycle agent → Slack reply |
+| 03 | [`03-daily-activity-report.json`](examples/03-daily-activity-report.json) | Cron → `listAgents` → JS aggregation → email |
+| 04 | [`04-n8n-as-loomcycle-tool.json`](examples/04-n8n-as-loomcycle-tool.json) | **Vector 2** — n8n workflow as MCP server consumed by loomcycle |
+| 05 | [`05-ai-agent-with-loomcycle-memory.json`](examples/05-ai-agent-with-loomcycle-memory.json) | n8n AI Agent + Memory + Sub-Agent cluster tools |
+| 06 | [`06-dynamic-mcp-provisioning.json`](examples/06-dynamic-mcp-provisioning.json) | **Crown jewel** — `LoomCycleMcpServerTool` auto-provisioning |
+
+Import via **Workflows → Import from File**, then attach your LoomCycle API credential. See [`examples/README.md`](examples/README.md) for per-example prerequisites + caveats.
+
+## Provisioning MCP servers dynamically
+
+The `LoomCycleMcpServerTool` cluster sub-node is the package's signature feature. When the parent AI Agent invokes it:
+
+1. **On first run:** calls `mcpServerDef({op: 'get', name})` → on `NotFoundError`, calls `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. The substrate registers the MCP server; subsequent agent spawns can reference it as `mcp__<name>__*`.
+2. **On subsequent runs:** the `get` succeeds; `create` is skipped. Idempotent.
+3. **On invocation:** spawns the configured loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. The agent has access to the MCP server's tool surface for the duration of the run.
+
+### The env-var mirror
+
+The Headers field accepts **template strings** (not plaintext credentials):
+
+```
+Authorization: Bearer ${LOOMCYCLE_SLACK_TOKEN}
+```
+
+At request time, loomcycle substitutes `${LOOMCYCLE_*}` tokens from its own environment. **The operator must mirror the credential**: it lives in n8n (for n8n's own Slack credential, if any) AND in loomcycle's env (`LOOMCYCLE_SLACK_TOKEN=…`). Plaintext credentials never traverse the n8n → loomcycle wire.
+
+The cluster sub-node logs the detected env-var names so you can see them in n8n's execution log:
+
+```
+[LoomCycleMcpServerTool] MCP server slack-mcp registered. Required env vars on loomcycle: LOOMCYCLE_SLACK_TOKEN
+```
+
+## Local development install
+
+Want to install from the local checkout for development?
+
+```bash
+# In this package:
+git clone https://github.com/denn-gubsky/n8n-nodes-loomcycle.git
+cd n8n-nodes-loomcycle
+npm install
+npm run build
+npm link
+
+# In your n8n install (e.g. ~/.n8n/nodes):
+cd ~/.n8n/nodes
+npm link n8n-nodes-loomcycle
+
+# Then restart n8n. The 7 nodes appear under the "LoomCycle" prefix in
+# the node picker.
+```
+
+## Compatibility
+
+### Loomcycle version compatibility
+
+| Feature | Min loomcycle | Notes |
+|---|---|---|
+| Run / Memory (read) / basic Channel | v0.8.x | Substrate stability since v0.8.4 |
+| Channel CRUD (publish / subscribe / peek / ack) | **v0.9.2** | PR #180 on the substrate |
+| AgentDef + SkillDef substrate-admin ops | v0.8.22 | PR #163 |
+| `content_sha256` Verify op | v0.9.x | PR #175 |
+| **MCPServerDef substrate** (dynamic MCP) | **v0.9.2** | PR #177; required by `LoomCycleMcpServerTool` |
+| `parentAgentId` filter + `debug` toggle on streams | v0.9.2 | PR #181 |
+
+If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
+
+### n8n version compatibility
+
+- **Minimum:** n8n `1.82.0` (cluster-node API stability threshold)
+- **Tested against:** n8n latest
+- **Node.js:** ≥ 20.15
+
+### `@loomcycle/client` pin
+
+This package pins `@loomcycle/client` to `^0.9.2`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `n8n-nodes-loomcycle` major bump.
+
+## Troubleshooting
+
+### `Authentication failed` after credential test
+
+The bearer token doesn't match the loomcycle deployment's `LOOMCYCLE_AUTH_TOKEN`. Verify by `curl`:
+
+```bash
+curl -H "Authorization: Bearer <your-token>" http://127.0.0.1:8787/healthz
+```
+
+Expect `{"ok":true}`.
+
+### `Channel not declared` on a Publish
+
+The channel must exist in loomcycle's `channels:` yaml block before the publish lands. Declare it operator-side and restart loomcycle. (Dynamic channel creation isn't supported in the substrate today.)
+
+### MCPServerDef ops return "endpoint unknown"
+
+You're on a loomcycle older than v0.9.2 (PR #177). Upgrade the substrate.
+
+### SSE trigger stops firing after ~30 minutes
+
+This is the substrate's server-side stream cap. The trigger reconnects transparently — check the n8n execution log; you should see emit events resume within seconds. If your reverse proxy / Cloudflare drops long-lived connections, switch the trigger's `Transport` parameter to **Polling**.
+
+### `LoomCycleMcpServerTool` says "Required env vars on loomcycle: …"
+
+That's the env-var-mirror hint, not an error. Set the listed env vars on the loomcycle deployment (not on n8n). Restart loomcycle so they're in scope. The MCP server will then authenticate when the agent invokes it.
+
+### Cluster sub-nodes (`LoomCycle * Tool`) don't appear in n8n's AI Agent picker
+
+n8n's cluster-node API stabilised at `1.82.0`. Older n8n versions won't show the sub-nodes. Upgrade n8n.
+
+## Filing issues / contributing
+
+- **Bug reports:** [GitHub issues](https://github.com/denn-gubsky/n8n-nodes-loomcycle/issues) — please include n8n version, loomcycle version, and a minimum reproduction (a workflow JSON you can attach).
+- **Loomcycle wire-API gaps:** file against [loomcycle](https://github.com/denn-gubsky/loomcycle/issues) — this package is a thin adapter over `@loomcycle/client`.
+- **Pull requests:** see [`CLAUDE.md`](CLAUDE.md) for development conventions + the 8 locked design constraints.
 
 ## License
 

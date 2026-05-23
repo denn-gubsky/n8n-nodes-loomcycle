@@ -24,6 +24,9 @@ doc-internal/
 docs/
 CHANGELOG.md
 *.tsbuildinfo
+dist/*.tsbuildinfo
+dist/**/*.tsbuildinfo
+examples/
 coverage/
 
 # Editor + OS

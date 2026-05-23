@@ -1,0 +1,39 @@
+# Daily integration cron — runs the live-loomcycle smoke matrix against
+# the operator's deployment URL. Requires LOOMCYCLE_BASE_URL +
+# LOOMCYCLE_AUTH_TOKEN GitHub secrets. Without them, the workflow does
+# nothing (test/integration/live-loomcycle.test.ts auto-skips).
+#
+# Deferred-from-2.5: "smoke matrix loomcycle × n8n." Full container
+# spin-up (loomcycle + n8n images, execute each example workflow) is a
+# future enhancement.
+#
+# Inputs: only the safe `schedule` / `workflow_dispatch` triggers plus
+# trusted secrets. No untrusted-input substitutions (issue titles, PR
+# bodies, commit messages, etc.).
+name: integration
+
+on:
+  schedule:
+    - cron: '0 7 * * *' # daily at 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Run live-loomcycle smoke
+        env:
+          LOOMCYCLE_BASE_URL: ${{ secrets.LOOMCYCLE_BASE_URL }}
+          LOOMCYCLE_AUTH_TOKEN: ${{ secrets.LOOMCYCLE_AUTH_TOKEN }}
+        run: |
+          if [ -z "$LOOMCYCLE_BASE_URL" ]; then
+            echo "::warning::LOOMCYCLE_BASE_URL secret not set — live tests will auto-skip"
+          fi
+          npm test -- test/integration/
