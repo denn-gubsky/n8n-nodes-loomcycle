@@ -2,6 +2,22 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-05-23
+
+Patch release. **Fixes node-picker visibility on n8n 2.x** (reported as: package loads cleanly, all 7 nodes register, Community Nodes panel shows green check, but `LoomCycle`, `LoomCycle: Run Completed`, and `LoomCycle: Channel Message` don't appear when searched in the workflow canvas's general node-picker / trigger-picker).
+
+### Fixed
+
+- **Removed `"categories": ["AI"]` from the codex registration of the 3 user-facing nodes**: the umbrella `LoomCycle` action node, `LoomCycle: Run Completed` trigger, and `LoomCycle: Channel Message` trigger. n8n 2.x treats codex `categories: ["AI"]` as a strong filter that scopes a node to AI-Agent contexts only; combined with `group: ['transform']` / `group: ['trigger']` it produced a contradiction that hid these nodes from the regular workflow node-picker entirely. The 4 cluster sub-nodes (Memory Tool / Channel Tool / Sub-Agent Tool / MCP Server Tool) keep their AI category — they legitimately belong there (their `outputs: [NodeConnectionTypes.AiTool]` already restricts them to AI Agent tool slots).
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` 200 passing + 4 skipped (no test changes; codex JSONs aren't covered by the test surface)
+- `npm run build` produces all 7 node paths
+- Codex JSON sanity: 3 user-facing nodes have no `categories` field; 4 cluster sub-nodes retain `categories: ["AI"]`
+
 ## [1.0.1] — 2026-05-23
 
 Patch release. **Fixes install on n8n's CommonJS community-node loader** (reported on self-hosted n8n / TrueNAS as: `No "exports" main defined in @loomcycle/client/package.json`).
