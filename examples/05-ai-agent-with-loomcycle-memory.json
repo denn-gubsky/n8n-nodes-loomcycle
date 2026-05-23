@@ -1,0 +1,99 @@
+{
+	"name": "05 — n8n AI Agent + LoomCycle Memory + Sub-Agent",
+	"nodes": [
+		{
+			"id": "node-chat-trigger",
+			"name": "When Chat Message Received",
+			"type": "@n8n/n8n-nodes-langchain.chatTrigger",
+			"typeVersion": 1.1,
+			"position": [200, 300],
+			"parameters": {}
+		},
+		{
+			"id": "node-llm",
+			"name": "OpenAI Chat Model",
+			"type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+			"typeVersion": 1,
+			"position": [400, 500],
+			"parameters": {
+				"model": "gpt-4o-mini",
+				"options": {}
+			},
+			"credentials": {
+				"openAiApi": {
+					"id": "openai-creds",
+					"name": "OpenAI API"
+				}
+			}
+		},
+		{
+			"id": "node-memory-tool",
+			"name": "LoomCycle Memory Tool",
+			"type": "n8n-nodes-loomcycle.loomCycleMemoryTool",
+			"typeVersion": 1,
+			"position": [600, 500],
+			"parameters": {
+				"toolName": "loomcycle_memory",
+				"toolDescription": "Read loomcycle Memory entries. Use op=listScopes / listScopeIDs / listEntries / getEntry to retrieve cross-conversation state."
+			},
+			"credentials": {
+				"loomCycleApi": {
+					"id": "loomcycle-creds",
+					"name": "LoomCycle API"
+				}
+			}
+		},
+		{
+			"id": "node-subagent-tool",
+			"name": "LoomCycle Researcher (Sub-Agent)",
+			"type": "n8n-nodes-loomcycle.loomCycleSubAgentTool",
+			"typeVersion": 1,
+			"position": [800, 500],
+			"parameters": {
+				"toolName": "loomcycle_research",
+				"toolDescription": "Delegate a deep-research task to a specialised loomcycle agent. Pass the question as the prompt; receive a comprehensive answer.",
+				"agent": "researcher",
+				"treatPromptAsUntrusted": true
+			},
+			"credentials": {
+				"loomCycleApi": {
+					"id": "loomcycle-creds",
+					"name": "LoomCycle API"
+				}
+			}
+		},
+		{
+			"id": "node-ai-agent",
+			"name": "AI Agent",
+			"type": "@n8n/n8n-nodes-langchain.agent",
+			"typeVersion": 2,
+			"position": [600, 300],
+			"parameters": {
+				"options": {
+					"systemMessage": "You are a helpful research assistant. Use the loomcycle_memory tool to recall previous conversations; use loomcycle_research to delegate deep questions to the specialised researcher agent."
+				}
+			}
+		}
+	],
+	"connections": {
+		"When Chat Message Received": {
+			"main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]]
+		},
+		"OpenAI Chat Model": {
+			"ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]]
+		},
+		"LoomCycle Memory Tool": {
+			"ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]]
+		},
+		"LoomCycle Researcher (Sub-Agent)": {
+			"ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]]
+		}
+	},
+	"active": false,
+	"settings": {},
+	"pinData": {},
+	"meta": {
+		"templateCredsSetupCompleted": false,
+		"description": "Demonstrates how an n8n AI Agent reaches into loomcycle: persistent memory across chat sessions via the Memory Tool, and deep-task delegation via the Sub-Agent Tool. The n8n agent is the conversational front-end; loomcycle agents do the heavy lifting."
+	}
+}

@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-loomcycle",
-	"version": "0.5.0",
-	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.4 adds 4 cluster sub-nodes that plug into n8n's AI Agent: Memory Tool, Channel Tool, Sub-Agent Tool, and the strategic differentiator MCP Server Tool (dynamic MCP server provisioning).",
+	"version": "0.6.0",
+	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.5 ships 6 importable example workflows covering canonical composition patterns (multi-agent research, Slack assistant, scheduled report, n8n-as-loomcycle-tool, AI Agent + cluster sub-nodes, dynamic MCP provisioning), plus a live-loomcycle smoke test and helper scripts.",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",

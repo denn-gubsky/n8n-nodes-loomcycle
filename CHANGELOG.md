@@ -2,6 +2,33 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-05-23
+
+Sub-phase 2.5 — **example workflows**. Six importable n8n workflows demonstrating canonical composition patterns, plus a live-loomcycle smoke test + helper scripts.
+
+### Added
+
+- **`examples/01-multi-agent-research.json`** — researcher → summariser → channel-published digest.
+- **`examples/02-slack-loomcycle-slack.json`** — Slack trigger → loomcycle agent (per-channel session) → Slack reply.
+- **`examples/03-daily-activity-report.json`** — Cron → `listAgents` (parallel completed + failed) → JS aggregation → email. Uses `listAgents` instead of the deferred `Evaluation` tool.
+- **`examples/04-n8n-as-loomcycle-tool.json`** — Vector 2 RFC pattern: n8n workflow exposed as an MCP server consumed by loomcycle agents.
+- **`examples/05-ai-agent-with-loomcycle-memory.json`** — n8n AI Agent + `LoomCycleMemoryTool` + `LoomCycleSubAgentTool` cluster sub-nodes.
+- **`examples/06-dynamic-mcp-provisioning.json`** — **crown jewel** — `LoomCycleMcpServerTool` provisioning Slack MCP into the loomcycle substrate dynamically.
+- **`examples/README.md`** — per-example narrative + prerequisites + import instructions.
+- **`scripts/import-examples.sh`** — helper to bulk-import via `n8n import:workflow`.
+- **`scripts/start-loomcycle.sh`** — local helper for spinning up the loomcycle binary.
+- **`test/examples/workflowSchema.test.ts`** — 37 Vitest cases per-workflow: shape validation + connection-reference integrity + cross-reference against `package.json` `n8n.nodes[]` (catches drift if a node type is renamed/deleted without updating the examples).
+- **`test/integration/live-loomcycle.test.ts`** — 4 smoke tests against a running loomcycle (health, listChannels, listMemoryScopes, mcpServerDef list). Auto-skips when `LOOMCYCLE_BASE_URL` is unset; ships green in standard CI.
+
+### Out of scope (deferred to Sub-phase 2.6)
+
+- The daily-cron CI workflow that spins up loomcycle + n8n containers and runs the example workflows end-to-end. Infrastructure-heavy; the schema-validation tests + the smoke matrix here cover the wire-API surface. The container-cron lands alongside the npm publish + community-node directory submission.
+
+### Notes for operators
+
+- All example JSONs use placeholder credential IDs (`loomcycle-creds`, `slack-creds`, etc.). After import, click each LoomCycle node and (re)select your actual credential.
+- Example #06 requires loomcycle ≥ v0.9.2 (PR #177 `MCPServerDef` substrate) AND the `LOOMCYCLE_SLACK_TOKEN` env var on the loomcycle side. The n8n side carries only the template string `${LOOMCYCLE_SLACK_TOKEN}` — plaintext credentials never traverse the wire.
+
 ## [0.5.0] — 2026-05-23
 
 Sub-phase 2.4 — **cluster sub-nodes**. n8n's AI Agent can now reach into loomcycle through 4 new tools.
