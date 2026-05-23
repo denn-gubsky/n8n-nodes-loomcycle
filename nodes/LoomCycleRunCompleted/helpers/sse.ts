@@ -1,5 +1,5 @@
 import type { IDataObject, ITriggerFunctions } from 'n8n-workflow';
-import type { LoomcycleClient, RunStateEvent } from '@loomcycle/client';
+import type { LoomcycleClient } from '@loomcycle/client';
 
 /**
  * SSE-driven event loop for the LoomCycleRunCompleted trigger.
@@ -34,7 +34,7 @@ export async function runSseLoop(this: ITriggerFunctions, opts: SseOptions): Pro
 	while (!opts.signal.aborted) {
 		try {
 			for await (const item of opts.client.streamUserRunStates(opts.userId, {
-				statuses: opts.statuses.length > 0 ? (opts.statuses as RunStateEvent['status'][]) : undefined,
+				statuses: opts.statuses.length > 0 ? opts.statuses : undefined,
 				agent: opts.agent,
 				parentAgentId: opts.parentAgentId,
 				debug: opts.debug,
@@ -58,8 +58,15 @@ export async function runSseLoop(this: ITriggerFunctions, opts: SseOptions): Pro
 		} catch (err) {
 			if (opts.signal.aborted) return;
 			attempt += 1;
-			this.emitError(err as Error);
-			if (attempt >= 5) return; // give up after 5 reconnects without ever yielding
+			if (attempt >= 5) {
+				// Terminal — no more reconnects. emitError ONCE so n8n's
+				// trigger lifecycle deactivates rather than going silently
+				// deaf. Earlier attempts swallow the error + backoff because
+				// transient SSE drops are normal (30-min server cap,
+				// reverse-proxy idle resets, etc).
+				this.emitError(err as Error);
+				return;
+			}
 			await sleep(opts.reconnectBackoffMs * Math.min(attempt, 4), opts.signal);
 		}
 	}

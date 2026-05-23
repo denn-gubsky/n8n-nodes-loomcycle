@@ -148,9 +148,10 @@ describe('runSseLoop', () => {
 		expect(streamUserRunStates).not.toHaveBeenCalled();
 	});
 
-	it('emitError on stream throw + gives up after 5 attempts', async () => {
+	it('emitError ONCE on terminal give-up (5 consecutive errors) + does not spam during reconnects', async () => {
 		const ac = new AbortController();
-		// Throws on call → loop hits catch → emitError → retries up to 5×.
+		// Throws on every call → loop hits catch → retries 5× silently → gives up
+		// → emitError fires ONCE on the terminal attempt.
 		const streamUserRunStates = vi.fn(() => {
 			throw new Error('boom');
 		});
@@ -166,9 +167,50 @@ describe('runSseLoop', () => {
 			reconnectBackoffMs: 1,
 		});
 
-		expect(ctx.emitError).toHaveBeenCalled();
-		// Bound: at least 1 emitError, at most 5 (per the give-up cap in the loop).
-		expect(ctx.emitError.mock.calls.length).toBeGreaterThanOrEqual(1);
-		expect(ctx.emitError.mock.calls.length).toBeLessThanOrEqual(5);
+		// Exactly one emitError — no spam during the 4 transient retries.
+		expect(ctx.emitError).toHaveBeenCalledTimes(1);
+		// And streamUserRunStates was retried up to the cap.
+		expect(streamUserRunStates).toHaveBeenCalledTimes(5);
+	});
+
+	it('resets the consecutive-failure counter after a clean stream close', async () => {
+		// Verifies: when the stream returns cleanly (no throw), the next
+		// reconnect cycle starts fresh — a single later failure does NOT
+		// re-trigger the terminal give-up path.
+		const ac = new AbortController();
+		let openCount = 0;
+		const streamUserRunStates = vi.fn(() => {
+			openCount++;
+			if (openCount === 1) {
+				// First open: clean stream with one event, then EOF (no abort yet).
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { kind: 'event', payload: { run_id: 'r1', status: 'completed', ts: 't1' } };
+					},
+				};
+			}
+			// Second open: abort + return empty so the outer while exits.
+			ac.abort();
+			return {
+				async *[Symbol.asyncIterator]() {
+					/* empty */
+				},
+			};
+		});
+		const ctx = makeCtx();
+
+		await runSseLoop.call(ctx as unknown as LoopThis, {
+			client: { streamUserRunStates } as unknown as Parameters<typeof runSseLoop>[0]['client'],
+			userId: 'u1',
+			statuses: [],
+			debug: false,
+			emitClose: false,
+			signal: ac.signal,
+			reconnectBackoffMs: 1,
+		});
+
+		expect(streamUserRunStates).toHaveBeenCalledTimes(2);
+		expect(ctx.emit).toHaveBeenCalledTimes(1); // emitted the event from open #1
+		expect(ctx.emitError).not.toHaveBeenCalled(); // no failures
 	});
 });

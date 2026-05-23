@@ -5,6 +5,7 @@ import {
 	AlreadyPausingError,
 	AuthError,
 	BackpressureError,
+	ChannelCursorRegressionError,
 	HookNotFoundError,
 	InvalidArgumentError,
 	LoomcycleError,
@@ -122,6 +123,14 @@ describe('wrapLoomcycleError', () => {
 	it('maps BackpressureError → 429', () => {
 		const wrapped = wrapLoomcycleError(makeLoomcycleError(BackpressureError, 'busy', 429), NODE);
 		expect((wrapped as NodeApiError).httpCode).toBe('429');
+	});
+
+	it('maps ChannelCursorRegressionError → NodeApiError 409 with re-fetch hint', () => {
+		const err = makeLoomcycleError(ChannelCursorRegressionError, 'cursor regression', 409);
+		const wrapped = wrapLoomcycleError(err, NODE);
+		expect(wrapped).toBeInstanceOf(NodeApiError);
+		expect((wrapped as NodeApiError).httpCode).toBe('409');
+		expect((wrapped as NodeApiError).message).toContain('cursor regression');
 	});
 
 	it('maps AlreadyPausingError + NotPausedError + SessionBusyError + AgentIDInUseError → 409', () => {

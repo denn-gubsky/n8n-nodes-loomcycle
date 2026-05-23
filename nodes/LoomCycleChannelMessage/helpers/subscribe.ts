@@ -31,17 +31,28 @@ export interface SubscribeOptions {
 	signal: AbortSignal;
 }
 
+const MAX_CONSECUTIVE_FAILURES = 5;
+
 export async function runSubscribeLoop(this: ITriggerFunctions, opts: SubscribeOptions): Promise<void> {
+	let consecutiveFailures = 0;
 	while (!opts.signal.aborted) {
 		try {
 			const emitted = await subscribeOnce.call(this, opts);
+			consecutiveFailures = 0;
 			if (emitted === 0) {
 				// long-poll returned empty (timed out); loop immediately
 				continue;
 			}
 		} catch (err) {
 			if (opts.signal.aborted) return;
-			this.emitError(err as Error);
+			consecutiveFailures += 1;
+			if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+				// Terminal — bail out so n8n's trigger lifecycle deactivates
+				// rather than spinning indefinitely on (e.g.) a permanent
+				// ChannelCursorRegressionError on ack.
+				this.emitError(err as Error);
+				return;
+			}
 			await sleep(opts.backoffMs, opts.signal);
 		}
 	}
