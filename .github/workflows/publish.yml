@@ -1,8 +1,7 @@
-# Publish workflow — DRY-RUN ONLY through Sub-phase 2.5.
-# Becomes a real publish at Sub-phase 2.6 (RFC §"Phase 2.6 — Docs + publish").
-# Triggers on v*.*.* tags + manual dispatch.
-# Uses only the safe github.ref (tag name) implicitly via the trigger; no
-# untrusted-input substitutions (issue titles, PR bodies, commit messages).
+# Publish workflow — fires on v*.*.* tags + manual dispatch.
+# Uses npm provenance to attest the package was built from this repo.
+# No untrusted-input substitutions (issue titles, PR bodies, commit
+# messages); only the safe github.ref (tag name) flows via the trigger.
 name: publish
 
 on:
@@ -10,6 +9,15 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run only (default true when manually dispatched)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
   publish:
@@ -29,7 +37,15 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      - name: Dry-run publish (Sub-phase 2.0 — flip --dry-run off in 2.6)
-        run: npm publish --dry-run --access public
+      - name: Publish (tag push = real publish; workflow_dispatch defaults to dry-run)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry-run publish (no actual upload)"
+            npm publish --dry-run --access public
+          else
+            echo "Real publish with provenance"
+            npm publish --provenance --access public
+          fi

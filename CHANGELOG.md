@@ -2,6 +2,48 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-05-23
+
+**First stable release.** Sub-phase 2.6 of [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). All of Phase 2 (Sub-phases 2.0 through 2.5) is now bundled under one stable major version + this package is ready for the n8n community-node directory.
+
+### What's in 1.0.0
+
+The cumulative shape from the 6 sub-phases:
+
+- **1 credential** — `LoomCycle API` (bearer + base URL + optional defaults; `/healthz` test)
+- **1 umbrella action node** — `LoomCycle` with 6 resource groups and ~40 operations (Run / Memory / Channel / AgentDef / SkillDef / MCPServerDef + Context-shape ops where adapter-available)
+- **2 trigger nodes** — `LoomCycle: Run Completed` (SSE primary, polling fallback) and `LoomCycle: Channel Message` (long-poll subscribe with at-most-once + at-least-once delivery modes)
+- **4 cluster sub-nodes** — Memory / Channel / Sub-Agent / **MCP Server Tool** (the strategic differentiator)
+- **6 example workflow JSONs** under `examples/` covering the canonical composition patterns
+
+### Sub-phase 2.6 deliverables
+
+- **Operator-facing `README.md`** — comprehensive install / configure / node-reference / examples / troubleshooting / MCP env-var-mirror / version-compatibility-matrix guide. Replaces the 2.0 stub.
+- **`doc/RELEASE.md`** — internal tag/publish/announce checklist. Documents the `1.0.0-rc1` soak procedure.
+- **`doc/SUPPORT.md`** — version compatibility matrix + breaking-change policy + how to file issues + security-disclosure path.
+- **`.github/workflows/publish.yml`** — wired to fire on `v*.*.*` tags with `npm publish --provenance --access public`. `workflow_dispatch` defaults to dry-run; flip the `dry_run` input to `false` to publish via manual trigger.
+- **`.github/workflows/integration.yml`** — daily-cron live-loomcycle smoke matrix (uses `LOOMCYCLE_BASE_URL` + `LOOMCYCLE_AUTH_TOKEN` GitHub secrets; auto-skips when unset).
+
+### Cumulative stats
+
+| Metric | Value |
+|---|---|
+| Files | 70 source + 18 test |
+| Lines of TypeScript | ~6,500 (excluding tests + JSON) |
+| Lines of JSON examples | ~750 |
+| Vitest cases | **200 passing + 4 skipped** |
+| Min loomcycle | v0.9.2 |
+| Min n8n | 1.82.0 |
+| Min Node.js | 20.15 |
+
+### Migration from 0.x
+
+This is the first stable release; no migration needed. Operators on the `0.x` interim releases (0.1.0 — 0.6.0) can upgrade directly to `1.0.0` — no breaking changes were introduced in the 1.0 release itself; the version bump signals API stability.
+
+### Acknowledgements
+
+The locked design across all 6 sub-phases tracks the operator's [RFC `n8n-comparison.md`](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md) and the [MCPServerDef cross-repo plan](doc-internal/mcp-server-def-cross-repo.md) — both authored before this package's code existed.
+
 ## [0.6.0] — 2026-05-23
 
 Sub-phase 2.5 — **example workflows**. Six importable n8n workflows demonstrating canonical composition patterns, plus a live-loomcycle smoke test + helper scripts.
