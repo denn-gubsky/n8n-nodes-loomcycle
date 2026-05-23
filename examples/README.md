@@ -138,7 +138,7 @@ Subsequent workflow runs hit the `get` branch and skip `create` — no churn.
 npm link
 
 # In a local n8n install:
-npm link n8n-nodes-loomcycle
+npm link @loomcycle/n8n-nodes-loomcycle
 n8n start
 
 # Then import any of the examples via the n8n UI.

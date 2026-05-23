@@ -46,11 +46,11 @@ The `.github/workflows/publish.yml` workflow fires on the `v*.*.*` tag:
 1. CI matrix passes
 2. `npm publish --provenance --access public` — uses the `NPM_TOKEN` GitHub secret
 
-Within ~30 seconds, `npm view n8n-nodes-loomcycle version` should return the new version.
+Within ~30 seconds, `npm view @loomcycle/n8n-nodes-loomcycle version` should return the new version.
 
 ## Post-release
 
-1. **Verify on npm** — `npm view n8n-nodes-loomcycle versions --json | tail`
+1. **Verify on npm** — `npm view @loomcycle/n8n-nodes-loomcycle versions --json | tail`
 2. **Smoke-install** — fresh n8n container, install the package via the Community Nodes UI, drag a node onto a canvas, verify it loads
 3. **Update GitHub release notes** — `gh release create vX.Y.Z --notes-file CHANGELOG.md` (or the relevant section)
 4. **Announce** in:

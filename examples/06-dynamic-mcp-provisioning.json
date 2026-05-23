@@ -29,7 +29,7 @@
 		{
 			"id": "node-mcp-server-tool",
 			"name": "LoomCycle MCP Server: Slack",
-			"type": "n8n-nodes-loomcycle.loomCycleMcpServerTool",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleMcpServerTool",
 			"typeVersion": 1,
 			"position": [600, 500],
 			"parameters": {
