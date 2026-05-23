@@ -2,6 +2,27 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-23
+
+Sub-phase 2.3 — trigger nodes. n8n workflows can now START from loomcycle events.
+
+### Added
+
+- **`LoomCycle: Run Completed`** trigger — fires when an agent run reaches a terminal state (completed / failed / cancelled). Two transports:
+  - **SSE (default)** — persistent `streamUserRunStates` consumer with transparent reconnect on the substrate's 30-min server cap. `parentAgentId` filter + `debug` toggle forwarded; opt-in `Surface Stream Open/Close Events` parameter surfaces the synthetic `stream_close` meta-frames as `__meta: 'stream_close'` rows.
+  - **Polling fallback** — periodic `listUserAgents` calls with `workflowStaticData`-backed dedup. Use when the deployment can't sustain long-lived SSE (Cloudflare workers, naive nginx with `proxy_buffering on`, etc.).
+- **`LoomCycle: Channel Message`** trigger — fires per new message on a watched channel. Direct `subscribeChannel` long-poll (v0.9.2 Channel CRUD, PR #180). Two delivery modes:
+  - **Auto-ack (default)** — substrate auto-commits the cursor on a non-empty batch (at-most-once).
+  - **Peek + Explicit Ack** — `peekChannel` + emit + `ackChannel` after; cursor persisted in `workflowStaticData` (at-least-once, survives workflow crashes mid-processing).
+- **`nodes/LoomCycle/helpers/staticData.ts`** — typed wrappers for `getWorkflowStaticData('node')` (seen-set + cursor with bounded retention).
+- **Tests:** +18 Vitest cases across 3 new test files (sse + poll + subscribe), totalling 127 / 11 files.
+
+### Notes for operators
+
+- Both triggers honour the credential's `Default User ID` when the per-node parameter is empty.
+- Both triggers implement `manualTriggerFunction` so the n8n editor's "Listen for Test Event" button does a single one-shot listen.
+- The SSE trigger's reconnect backoff is exponential (capped at 4×). After 5 consecutive failures the loop gives up.
+
 ## [0.3.0] — 2026-05-23
 
 Sub-phase 2.2 — substrate-admin resources. The umbrella `LoomCycle` node gains three new resources for versioned-definition management.

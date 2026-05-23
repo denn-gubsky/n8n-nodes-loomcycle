@@ -1,7 +1,7 @@
 {
 	"name": "n8n-nodes-loomcycle",
-	"version": "0.3.0",
-	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.2 extends the umbrella LoomCycle node with AgentDef / SkillDef / MCPServerDef substrate-admin resources.",
+	"version": "0.4.0",
+	"description": "n8n community nodes for the loomcycle agentic runtime — design and operate loomcycle agents from n8n's visual builder. Sub-phase 2.3 adds trigger nodes: LoomCycleRunCompleted (SSE + polling fallback) and LoomCycleChannelMessage (long-poll subscribe with at-least-once option).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -48,7 +48,9 @@
 			"dist/credentials/LoomCycleApi.credentials.js"
 		],
 		"nodes": [
-			"dist/nodes/LoomCycle/LoomCycle.node.js"
+			"dist/nodes/LoomCycle/LoomCycle.node.js",
+			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
+			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js"
 		]
 	},
 	"dependencies": {
