@@ -1,4 +1,5 @@
 import type {
+	IDataObject,
 	IExecuteFunctions,
 	INode,
 	INodeExecutionData,
@@ -77,7 +78,7 @@ export function makeSupplyDataContext(opts: {
 export function makeExecuteContext(opts: {
 	params: Record<string, unknown>;
 	credentials?: Record<string, unknown>;
-	inputJson: Record<string, unknown>;
+	inputJson: IDataObject;
 }): IExecuteFunctions {
 	const credentials: Record<string, unknown> = {
 		baseUrl: 'http://127.0.0.1:8787',
