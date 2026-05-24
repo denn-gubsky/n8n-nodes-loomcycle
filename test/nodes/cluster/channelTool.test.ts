@@ -13,7 +13,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 });
 
 import { LoomCycleChannelTool } from '../../../nodes/LoomCycleChannelTool/LoomCycleChannelTool.node';
-import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
+import { makeSupplyDataContext, invokeSupplyData, makeExecuteContext, invokeExecute } from './_helpers';
 
 beforeEach(() => {
 	Object.values(mockClient).forEach((fn) => fn.mockReset());
@@ -81,5 +81,17 @@ describe('LoomCycleChannelTool', () => {
 		const tool = result.response as { invoke: (args: unknown) => Promise<string> };
 		const out = await tool.invoke({ op: 'publish', channel: 'events', scope: 'user', payload: {} });
 		expect(JSON.parse(out).error).toContain('userId required');
+	});
+
+	it('execute(op=peek) reads input + returns peek result JSON', async () => {
+		mockClient.peekChannel.mockResolvedValue({ channel: 'events', messages: [{ id: 'm1' }] });
+		const node = new LoomCycleChannelTool();
+		const ctx = makeExecuteContext({
+			params: { toolName: 'ch', toolDescription: 'd' },
+			inputJson: { op: 'peek', channel: 'events', scope: 'global' },
+		});
+		const out = await invokeExecute(node, ctx);
+		expect(mockClient.peekChannel).toHaveBeenCalledOnce();
+		expect(out[0][0].json).toMatchObject({ channel: 'events', messages: [{ id: 'm1' }] });
 	});
 });

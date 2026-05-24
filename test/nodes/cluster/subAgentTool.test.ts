@@ -12,7 +12,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 });
 
 import { LoomCycleSubAgentTool } from '../../../nodes/LoomCycleSubAgentTool/LoomCycleSubAgentTool.node';
-import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
+import { makeSupplyDataContext, invokeSupplyData, makeExecuteContext, invokeExecute } from './_helpers';
 
 function asAsyncIterable<T>(items: T[]): AsyncIterable<T> {
 	return {
@@ -85,5 +85,23 @@ describe('LoomCycleSubAgentTool', () => {
 		const tool = result.response as { invoke: (args: unknown) => Promise<string> };
 		await tool.invoke({ prompt: 'q' });
 		expect(mockClient.runStreaming.mock.calls[0][0].segments[0].content[0].type).toBe('trusted-text');
+	});
+
+	it('execute() spawns the configured agent + returns finalText in the output JSON', async () => {
+		mockClient.runStreaming.mockReturnValue(
+			asAsyncIterable([
+				{ type: 'text', text: 'hello-' },
+				{ type: 'text', text: 'world' },
+				{ type: 'done', stop_reason: 'end_turn' },
+			]),
+		);
+		const node = new LoomCycleSubAgentTool();
+		const ctx = makeExecuteContext({
+			params: { toolName: 'sub', toolDescription: 'd', agent: 'specialised', treatPromptAsUntrusted: true },
+			inputJson: { prompt: 'Do the thing' },
+		});
+		const out = await invokeExecute(node, ctx);
+		expect(mockClient.runStreaming).toHaveBeenCalledOnce();
+		expect(out[0][0].json).toMatchObject({ result: 'hello-world' });
 	});
 });

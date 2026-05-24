@@ -1,12 +1,19 @@
-import type { INodeType, INodeTypeDescription, ISupplyDataFunctions, SupplyData } from 'n8n-workflow';
+import type {
+	IExecuteFunctions,
+	INodeExecutionData,
+	INodeType,
+	INodeTypeDescription,
+	ISupplyDataFunctions,
+	SupplyData,
+} from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 import { z } from 'zod';
-import type { RunOptions } from '@loomcycle/client';
+import type { LoomcycleClient, RunOptions } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
 import { buildSegments } from '../LoomCycle/helpers/segments';
 import { drainRunStream } from '../LoomCycle/helpers/streaming';
-import { buildTool } from '../_shared/clusterTool';
+import { buildTool, executeToolFn } from '../_shared/clusterTool';
 
 /**
  * `LoomCycle Sub-Agent Tool` — cluster sub-node that lets the parent
@@ -91,43 +98,77 @@ export class LoomCycleSubAgentTool implements INodeType {
 	};
 
 	async supplyData(this: ISupplyDataFunctions): Promise<SupplyData> {
-		const toolName = this.getNodeParameter('toolName', 0, 'loomcycle_sub_agent') as string;
-		const toolDescription = this.getNodeParameter('toolDescription', 0, '') as string;
-		const agent = this.getNodeParameter('agent', 0) as string;
-		const userIdParam = this.getNodeParameter('userId', 0, '') as string;
-		const userTierParam = this.getNodeParameter('userTier', 0, '') as string;
-		const treatPromptAsUntrusted = this.getNodeParameter('treatPromptAsUntrusted', 0, true) as boolean;
-
-		const client = await getClient(this);
-		const userIdDefault = await getCredentialDefault(this, 'userId');
-		const userTierDefault = await getCredentialDefault(this, 'userTier');
-
-		const userId = userIdParam || userIdDefault;
-		const userTier = userTierParam || userTierDefault;
-
+		const captures = await collectSubAgentCaptures.call(this);
 		const tool = buildTool({
-			name: toolName,
-			description: toolDescription,
+			name: captures.toolName,
+			description: captures.toolDescription,
 			schema: SubAgentInputSchema,
-			fn: async (args) => {
-				const runOpts: RunOptions = {
-					agent,
-					segments: buildSegments(args.prompt, treatPromptAsUntrusted),
-				};
-				if (userId) runOpts.userId = userId;
-				if (userTier) runOpts.userTier = userTier;
-				if (args.sessionId) runOpts.sessionId = args.sessionId;
-
-				const result = await drainRunStream(client.runStreaming(runOpts));
-				// Return the finalText directly (string contract) so the parent
-				// AI Agent treats it as the tool's textual output. Metadata
-				// like usage/sessionId/agentId are dropped — too noisy for the
-				// agent's context. Operators wanting those should use the
-				// action node's Spawn op instead.
-				return result.finalText;
-			},
+			fn: (args) => runSubAgentOp(captures, args),
 		});
-
 		return { response: tool };
 	}
+
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const captures = await collectSubAgentCaptures.call(this);
+		return executeToolFn.call(this, {
+			schema: SubAgentInputSchema,
+			fn: (args) => runSubAgentOp(captures, args),
+		});
+	}
+}
+
+interface SubAgentCaptures {
+	client: LoomcycleClient;
+	toolName: string;
+	toolDescription: string;
+	agent: string;
+	userId: string;
+	userTier: string;
+	treatPromptAsUntrusted: boolean;
+}
+
+async function collectSubAgentCaptures(
+	this: ISupplyDataFunctions | IExecuteFunctions,
+): Promise<SubAgentCaptures> {
+	const toolName = this.getNodeParameter('toolName', 0, 'loomcycle_sub_agent') as string;
+	const toolDescription = this.getNodeParameter('toolDescription', 0, '') as string;
+	const agent = this.getNodeParameter('agent', 0) as string;
+	const userIdParam = this.getNodeParameter('userId', 0, '') as string;
+	const userTierParam = this.getNodeParameter('userTier', 0, '') as string;
+	const treatPromptAsUntrusted = this.getNodeParameter('treatPromptAsUntrusted', 0, true) as boolean;
+
+	const client = await getClient(this);
+	const userIdDefault = await getCredentialDefault(this, 'userId');
+	const userTierDefault = await getCredentialDefault(this, 'userTier');
+
+	return {
+		client,
+		toolName,
+		toolDescription,
+		agent,
+		userId: userIdParam || userIdDefault,
+		userTier: userTierParam || userTierDefault,
+		treatPromptAsUntrusted,
+	};
+}
+
+async function runSubAgentOp(
+	captures: SubAgentCaptures,
+	args: z.infer<typeof SubAgentInputSchema>,
+): Promise<string> {
+	const runOpts: RunOptions = {
+		agent: captures.agent,
+		segments: buildSegments(args.prompt, captures.treatPromptAsUntrusted),
+	};
+	if (captures.userId) runOpts.userId = captures.userId;
+	if (captures.userTier) runOpts.userTier = captures.userTier;
+	if (args.sessionId) runOpts.sessionId = args.sessionId;
+
+	const result = await drainRunStream(captures.client.runStreaming(runOpts));
+	// Return the finalText directly (string contract) so the parent AI
+	// Agent treats it as the tool's textual output. Metadata like
+	// usage/sessionId/agentId are dropped — too noisy for the agent's
+	// context. Operators wanting those should use the action node's
+	// Spawn op instead.
+	return result.finalText;
 }

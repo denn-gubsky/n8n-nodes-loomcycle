@@ -1,4 +1,12 @@
-import type { INode, INodeType, ISupplyDataFunctions, SupplyData } from 'n8n-workflow';
+import type {
+	IDataObject,
+	IExecuteFunctions,
+	INode,
+	INodeExecutionData,
+	INodeType,
+	ISupplyDataFunctions,
+	SupplyData,
+} from 'n8n-workflow';
 import { vi } from 'vitest';
 
 /**
@@ -58,4 +66,55 @@ export function makeSupplyDataContext(opts: {
 		logger,
 		helpers: {},
 	} as unknown as ISupplyDataFunctions;
+}
+
+/**
+ * Build a minimal `IExecuteFunctions` fixture for cluster-sub-node
+ * execute() tests (n8n Tools Agent invocation path, v1.82+).
+ *
+ * `inputJson` becomes the single input item — emulates the AI Agent
+ * passing the LLM's tool-call args into the node's getInputData().
+ */
+export function makeExecuteContext(opts: {
+	params: Record<string, unknown>;
+	credentials?: Record<string, unknown>;
+	inputJson: IDataObject;
+}): IExecuteFunctions {
+	const credentials: Record<string, unknown> = {
+		baseUrl: 'http://127.0.0.1:8787',
+		bearerToken: 'test-token',
+		userId: '',
+		userTier: '',
+		mcpUrl: '',
+		...(opts.credentials ?? {}),
+	};
+	const node: INode = {
+		id: 'test-cluster-node',
+		name: 'Cluster Test',
+		type: 'n8n-nodes-loomcycle.loomCycleClusterTool',
+		typeVersion: 1,
+		position: [0, 0],
+		parameters: {},
+	};
+	const logger = {
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+	};
+	const inputs: INodeExecutionData[] = [{ json: opts.inputJson }];
+	return {
+		getInputData: () => inputs,
+		getNodeParameter: (name: string, _itemIndex: number, fallback?: unknown) =>
+			name in opts.params ? opts.params[name] : fallback,
+		getCredentials: async () => credentials,
+		getNode: () => node,
+		continueOnFail: () => false,
+		logger,
+		helpers: {},
+	} as unknown as IExecuteFunctions;
+}
+
+export function invokeExecute(node: INodeType, ctx: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+	return (node.execute as unknown as (this: IExecuteFunctions) => Promise<INodeExecutionData[][]>).call(ctx);
 }

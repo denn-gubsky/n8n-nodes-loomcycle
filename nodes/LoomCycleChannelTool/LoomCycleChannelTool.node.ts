@@ -1,9 +1,17 @@
-import type { INodeType, INodeTypeDescription, ISupplyDataFunctions, SupplyData } from 'n8n-workflow';
+import type {
+	IExecuteFunctions,
+	INodeExecutionData,
+	INodeType,
+	INodeTypeDescription,
+	ISupplyDataFunctions,
+	SupplyData,
+} from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
+import type { LoomcycleClient } from '@loomcycle/client';
 import { z } from 'zod';
 
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
-import { buildTool } from '../_shared/clusterTool';
+import { buildTool, executeToolFn } from '../_shared/clusterTool';
 
 /**
  * `LoomCycle Channel Tool` — cluster sub-node exposing Channel Publish +
@@ -83,34 +91,49 @@ export class LoomCycleChannelTool implements INodeType {
 			name: toolName,
 			description: toolDescription,
 			schema: ChannelInputSchema,
-			fn: async (args) => {
-				const scope = args.scope ?? 'global';
-				const userId = scope === 'user' ? args.userId || credentialUserIdDefault : undefined;
-				if (scope === 'user' && !userId) {
-					throw new Error('userId required when scope=user (set on tool args or as credential default)');
-				}
-
-				if (args.op === 'publish') {
-					if (args.payload === undefined) {
-						throw new Error('payload is required for publish');
-					}
-					return client.publishChannel(args.channel, {
-						scope,
-						userId,
-						payload: args.payload,
-						deliverAt: args.deliverAt,
-					});
-				}
-				// peek
-				return client.peekChannel(args.channel, {
-					scope,
-					userId,
-					fromCursor: args.fromCursor,
-					maxMessages: args.maxMessages,
-				});
-			},
+			fn: (args) => runChannelOp(client, credentialUserIdDefault, args),
 		});
 
 		return { response: tool };
 	}
+
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const client = await getClient(this);
+		const credentialUserIdDefault = await getCredentialDefault(this, 'userId');
+		return executeToolFn.call(this, {
+			schema: ChannelInputSchema,
+			fn: (args) => runChannelOp(client, credentialUserIdDefault, args),
+		});
+	}
+}
+
+async function runChannelOp(
+	client: LoomcycleClient,
+	credentialUserIdDefault: string,
+	args: z.infer<typeof ChannelInputSchema>,
+): Promise<unknown> {
+	const scope = args.scope ?? 'global';
+	const userId = scope === 'user' ? args.userId || credentialUserIdDefault : undefined;
+	if (scope === 'user' && !userId) {
+		throw new Error('userId required when scope=user (set on tool args or as credential default)');
+	}
+
+	if (args.op === 'publish') {
+		if (args.payload === undefined) {
+			throw new Error('payload is required for publish');
+		}
+		return client.publishChannel(args.channel, {
+			scope,
+			userId,
+			payload: args.payload,
+			deliverAt: args.deliverAt,
+		});
+	}
+	// peek
+	return client.peekChannel(args.channel, {
+		scope,
+		userId,
+		fromCursor: args.fromCursor,
+		maxMessages: args.maxMessages,
+	});
 }
