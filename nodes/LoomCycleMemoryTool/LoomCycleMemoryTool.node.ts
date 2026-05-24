@@ -1,9 +1,17 @@
-import type { INodeType, INodeTypeDescription, ISupplyDataFunctions, SupplyData } from 'n8n-workflow';
+import type {
+	IExecuteFunctions,
+	INodeExecutionData,
+	INodeType,
+	INodeTypeDescription,
+	ISupplyDataFunctions,
+	SupplyData,
+} from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
+import type { LoomcycleClient } from '@loomcycle/client';
 import { z } from 'zod';
 
 import { getClient } from '../LoomCycle/helpers/client';
-import { buildTool } from '../_shared/clusterTool';
+import { buildTool, executeToolFn } from '../_shared/clusterTool';
 
 /**
  * `LoomCycle Memory Tool` — cluster sub-node that plugs into n8n's AI
@@ -77,29 +85,47 @@ export class LoomCycleMemoryTool implements INodeType {
 			name: toolName,
 			description: toolDescription,
 			schema: MemoryInputSchema,
-			fn: async (args) => {
-				switch (args.op) {
-					case 'listScopes':
-						return client.listMemoryScopes();
-					case 'listScopeIDs':
-						if (!args.scope) throw new Error('scope is required for listScopeIDs');
-						return client.listMemoryScopeIDs(args.scope);
-					case 'listEntries': {
-						if (!args.scope || !args.scopeID) throw new Error('scope + scopeID required for listEntries');
-						const opts: { prefix?: string; limit?: number } = {};
-						if (args.prefix) opts.prefix = args.prefix;
-						if (args.limit) opts.limit = args.limit;
-						return client.listMemoryEntries(args.scope, args.scopeID, opts);
-					}
-					case 'getEntry':
-						if (!args.scope || !args.scopeID || !args.key) {
-							throw new Error('scope + scopeID + key required for getEntry');
-						}
-						return client.getMemoryEntry(args.scope, args.scopeID, args.key);
-				}
-			},
+			fn: (args) => runMemoryOp(client, args),
 		});
 
 		return { response: tool };
+	}
+
+	/**
+	 * n8n Tools Agent (v1.82+) calls `execute()` directly when the LLM
+	 * invokes the tool. The tool-call args land in `getInputData()`;
+	 * we share the same logic with `supplyData()` via `runMemoryOp`.
+	 */
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const client = await getClient(this);
+		return executeToolFn.call(this, {
+			schema: MemoryInputSchema,
+			fn: (args) => runMemoryOp(client, args),
+		});
+	}
+}
+
+async function runMemoryOp(
+	client: LoomcycleClient,
+	args: z.infer<typeof MemoryInputSchema>,
+): Promise<unknown> {
+	switch (args.op) {
+		case 'listScopes':
+			return client.listMemoryScopes();
+		case 'listScopeIDs':
+			if (!args.scope) throw new Error('scope is required for listScopeIDs');
+			return client.listMemoryScopeIDs(args.scope);
+		case 'listEntries': {
+			if (!args.scope || !args.scopeID) throw new Error('scope + scopeID required for listEntries');
+			const opts: { prefix?: string; limit?: number } = {};
+			if (args.prefix) opts.prefix = args.prefix;
+			if (args.limit) opts.limit = args.limit;
+			return client.listMemoryEntries(args.scope, args.scopeID, opts);
+		}
+		case 'getEntry':
+			if (!args.scope || !args.scopeID || !args.key) {
+				throw new Error('scope + scopeID + key required for getEntry');
+			}
+			return client.getMemoryEntry(args.scope, args.scopeID, args.key);
 	}
 }

@@ -2,6 +2,39 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-05-24
+
+Patch release. **Fixes cluster sub-nodes on n8n's current Tools Agent (v1.82+)**: each of the 4 sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool) now implements both `supplyData()` (legacy LangChain-direct AI Agent modes) AND `execute()` (current Tools Agent mode), so they work across n8n versions.
+
+### Fixed
+
+- **`Problem in node 'LoomCycle Memory Tool': has a "supplyData" method but no "execute" method`** — and the same error for the other three cluster sub-nodes when wired into n8n's AI Agent in v1.82+. Root cause: n8n migrated its default AI Agent from older modes (OpenAI Functions Agent, Conversational Agent) that consume tools via LangChain's `DynamicStructuredTool.func` to the **Tools Agent** which invokes connected tools by calling their `execute()` directly through n8n's regular node-execution pipeline. We shipped only the `supplyData()` path; under Tools Agent the LLM's tool-call args land in `getInputData()` and n8n expects an `execute()` to consume them.
+- **Dual-mode tool nodes.** Each cluster sub-node now exposes both paths:
+  - `supplyData()` returns a LangChain `DynamicStructuredTool` for older agent modes (unchanged behaviour).
+  - `execute()` reads the LLM's tool-call args via `getInputData()`, validates them against the same Zod schema, runs the same operation, and returns the result as `INodeExecutionData[][]` for Tools Agent consumption.
+- **Shared logic, no duplication.** Each cluster sub-node extracts its operation body into a module-level helper (`runMemoryOp`, `runChannelOp`, `runSubAgentOp`, `runMcpServerOp`) that both `supplyData()` and `execute()` call. The MCP Server Tool's idempotent ensure-on-spawn (`mcpServerDef get→create`) runs once per `supplyData()` or `execute()` invocation just like before.
+
+### Added
+
+- **`executeToolFn` helper** in `nodes/_shared/clusterTool.ts` — sibling of `buildTool`. Handles the Tools Agent execute() plumbing: input parsing, Zod validation, error wrapping with bearer redaction (CLAUDE.md §security.6), result envelope shaping into `INodeExecutionData[][]`.
+
+### Internal
+
+- New test fixtures `makeExecuteContext` + `invokeExecute` in `test/nodes/cluster/_helpers.ts` mirror the existing `makeSupplyDataContext` + `invokeSupplyData`.
+- 5 new test cases (one execute() test per cluster sub-node + a bearer-redaction case on the new path). Total: **207 passing + 4 skipped** (was 202 + 4).
+
+### Known limitations (still tracked; not blocking)
+
+- `manualTriggerFunction` on `LoomCycle: Run Completed` still calls `pollOnce` regardless of `Transport` setting in editor test mode. Production (published) mode honours the setting correctly. Polish patch deferred.
+- `cleanupOnEnd` on the MCP Server Tool is honoured only via `supplyData()`'s `closeFunction`. Tools Agent's `execute()` path has no workflow-end lifecycle hook; operators wanting retire-on-execute should call `MCPServerDef → retire` via the umbrella action node.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 207 passing + 4 skipped
+- `npm run build` produces all 7 node paths
+
 ## [1.0.3] — 2026-05-24
 
 Patch release. **Real fix for the `Spawn → Agent` dropdown**: now populated from the loomcycle agent library (yaml-static + dynamically-registered AgentDefs), not from per-user run history.

@@ -14,7 +14,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 });
 
 import { LoomCycleMcpServerTool } from '../../../nodes/LoomCycleMcpServerTool/LoomCycleMcpServerTool.node';
-import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
+import { makeSupplyDataContext, invokeSupplyData, makeExecuteContext, invokeExecute } from './_helpers';
 import { NotFoundError } from '@loomcycle/client';
 
 function asAsyncIterable<T>(items: T[]): AsyncIterable<T> {
@@ -179,6 +179,31 @@ describe('LoomCycleMcpServerTool', () => {
 			await invokeSupplyData(node, ctx);
 			const logger = (ctx as unknown as { logger: { info: ReturnType<typeof vi.fn> } }).logger;
 			expect(logger.info).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('execute() — n8n Tools Agent invocation path', () => {
+		it('runs the idempotent ensure + spawns the agent with the MCP allowed-tools glob', async () => {
+			mockClient.mcpServerDef.mockResolvedValueOnce({ name: 'slack-mcp' });
+			mockClient.runStreaming.mockReturnValue(
+				asAsyncIterable([
+					{ type: 'text', text: 'posted-' },
+					{ type: 'text', text: 'to-slack' },
+					{ type: 'done', stop_reason: 'end_turn' },
+				]),
+			);
+			const node = new LoomCycleMcpServerTool();
+			const ctx = makeExecuteContext({
+				params: BASE_PARAMS,
+				inputJson: { prompt: 'Post a message to #general' },
+			});
+			const out = await invokeExecute(node, ctx);
+			expect(mockClient.mcpServerDef).toHaveBeenCalledOnce();
+			expect(mockClient.runStreaming).toHaveBeenCalledOnce();
+			const runArg = mockClient.runStreaming.mock.calls[0][0];
+			expect(runArg.agent).toBe('orchestrator');
+			expect(runArg.allowedTools).toEqual(['mcp__slack-mcp__*']);
+			expect(out[0][0].json).toMatchObject({ result: 'posted-to-slack' });
 		});
 	});
 });

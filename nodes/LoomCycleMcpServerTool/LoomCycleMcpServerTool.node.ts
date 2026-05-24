@@ -1,14 +1,21 @@
-import type { INodeType, INodeTypeDescription, ISupplyDataFunctions, SupplyData } from 'n8n-workflow';
+import type {
+	IExecuteFunctions,
+	INodeExecutionData,
+	INodeType,
+	INodeTypeDescription,
+	ISupplyDataFunctions,
+	SupplyData,
+} from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { z } from 'zod';
-import type { RunOptions, SubstrateToolInput } from '@loomcycle/client';
+import type { LoomcycleClient, RunOptions, SubstrateToolInput } from '@loomcycle/client';
 import { NotFoundError } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
 import { buildSegments } from '../LoomCycle/helpers/segments';
 import { drainRunStream } from '../LoomCycle/helpers/streaming';
 import { extractEnvVarsFromHeaders } from '../LoomCycle/helpers/envVarHints';
-import { buildTool } from '../_shared/clusterTool';
+import { buildTool, executeToolFn } from '../_shared/clusterTool';
 
 /**
  * `LoomCycle MCP Server Tool` — **the strategic differentiator** for the
@@ -162,82 +169,21 @@ export class LoomCycleMcpServerTool implements INodeType {
 	};
 
 	async supplyData(this: ISupplyDataFunctions): Promise<SupplyData> {
-		const toolName = this.getNodeParameter('toolName', 0, 'loomcycle_mcp') as string;
-		const toolDescription = this.getNodeParameter('toolDescription', 0, '') as string;
-		const mcpName = this.getNodeParameter('mcpName', 0) as string;
-		const transport = this.getNodeParameter('transport', 0) as string;
-		const mcpUrl = this.getNodeParameter('mcpUrl', 0) as string;
-		const headersParam = this.getNodeParameter('headers', 0, {}) as unknown;
-		const agent = this.getNodeParameter('agent', 0) as string;
-		const cleanupOnEnd = this.getNodeParameter('cleanupOnEnd', 0, false) as boolean;
-
-		if (transport !== 'http' && transport !== 'streamable-http') {
-			throw new NodeOperationError(
-				this.getNode(),
-				`Transport must be HTTP or Streamable-HTTP. Stdio MCP servers must be declared in loomcycle.yaml — dynamic registration does not support stdio.`,
-			);
-		}
-
-		const headers = collectHeaders(headersParam);
-		const client = await getClient(this);
-		const userIdDefault = await getCredentialDefault(this, 'userId');
-		const userTierDefault = await getCredentialDefault(this, 'userTier');
-
-		// Idempotent ensure: try get; on NotFoundError, create.
-		try {
-			await client.mcpServerDef({ op: 'get', name: mcpName });
-		} catch (err) {
-			if (!(err instanceof NotFoundError)) {
-				throw err;
-			}
-			const createInput: SubstrateToolInput = {
-				op: 'create',
-				name: mcpName,
-				promote: true,
-				// transport / url / headers ride on the index-signature
-				// (SubstrateToolInput has `[extra: string]: unknown`).
-				transport,
-				url: mcpUrl,
-			};
-			if (Object.keys(headers).length > 0) createInput.headers = headers;
-			await client.mcpServerDef(createInput);
-		}
-
-		// Env-var hints (defence-in-depth — surface in the node's log so
-		// operators see which env vars must exist on the loomcycle side).
-		const envVars = extractEnvVarsFromHeaders(headersParam);
-		if (envVars.length > 0) {
-			this.logger.info?.(
-				`[LoomCycleMcpServerTool] MCP server ${mcpName} registered. Required env vars on loomcycle: ${envVars.join(', ')}`,
-			);
-		}
-
-		const allowedToolGlob = `mcp__${mcpName}__*`;
+		const captures = await ensureAndCollectMcpCaptures.call(this);
 
 		const tool = buildTool({
-			name: toolName,
-			description: toolDescription,
+			name: captures.toolName,
+			description: captures.toolDescription,
 			schema: McpServerInputSchema,
-			fn: async (args) => {
-				const runOpts: RunOptions = {
-					agent,
-					segments: buildSegments(args.prompt, true), // model-supplied prompt → untrusted
-					allowedTools: [allowedToolGlob],
-				};
-				if (userIdDefault) runOpts.userId = userIdDefault;
-				if (userTierDefault) runOpts.userTier = userTierDefault;
-
-				const result = await drainRunStream(client.runStreaming(runOpts));
-				return result.finalText;
-			},
+			fn: (args) => runMcpServerOp(captures, args),
 		});
 
 		const supplyData: SupplyData = { response: tool };
 
-		if (cleanupOnEnd) {
+		if (captures.cleanupOnEnd) {
 			supplyData.closeFunction = async () => {
 				try {
-					await client.mcpServerDef({ op: 'retire', name: mcpName });
+					await captures.client.mcpServerDef({ op: 'retire', name: captures.mcpName });
 				} catch {
 					// Best-effort cleanup; n8n's lifecycle calls closeFunction
 					// at workflow-end and we don't want a failed retire to
@@ -248,6 +194,111 @@ export class LoomCycleMcpServerTool implements INodeType {
 
 		return supplyData;
 	}
+
+	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const captures = await ensureAndCollectMcpCaptures.call(this);
+		// Tools Agent invocation: no closeFunction equivalent — n8n calls
+		// execute() per invocation, not once per workflow run. The
+		// `cleanupOnEnd` flag is honoured only in supplyData (older
+		// agent modes); operators wanting retire-on-execute must call
+		// MCPServerDef → retire via the umbrella action node explicitly.
+		return executeToolFn.call(this, {
+			schema: McpServerInputSchema,
+			fn: (args) => runMcpServerOp(captures, args),
+		});
+	}
+}
+
+interface McpCaptures {
+	client: LoomcycleClient;
+	toolName: string;
+	toolDescription: string;
+	mcpName: string;
+	agent: string;
+	userIdDefault: string;
+	userTierDefault: string;
+	allowedToolGlob: string;
+	cleanupOnEnd: boolean;
+}
+
+async function ensureAndCollectMcpCaptures(
+	this: ISupplyDataFunctions | IExecuteFunctions,
+): Promise<McpCaptures> {
+	const toolName = this.getNodeParameter('toolName', 0, 'loomcycle_mcp') as string;
+	const toolDescription = this.getNodeParameter('toolDescription', 0, '') as string;
+	const mcpName = this.getNodeParameter('mcpName', 0) as string;
+	const transport = this.getNodeParameter('transport', 0) as string;
+	const mcpUrl = this.getNodeParameter('mcpUrl', 0) as string;
+	const headersParam = this.getNodeParameter('headers', 0, {}) as unknown;
+	const agent = this.getNodeParameter('agent', 0) as string;
+	const cleanupOnEnd = this.getNodeParameter('cleanupOnEnd', 0, false) as boolean;
+
+	if (transport !== 'http' && transport !== 'streamable-http') {
+		throw new NodeOperationError(
+			this.getNode(),
+			`Transport must be HTTP or Streamable-HTTP. Stdio MCP servers must be declared in loomcycle.yaml — dynamic registration does not support stdio.`,
+		);
+	}
+
+	const headers = collectHeaders(headersParam);
+	const client = await getClient(this);
+	const userIdDefault = await getCredentialDefault(this, 'userId');
+	const userTierDefault = await getCredentialDefault(this, 'userTier');
+
+	// Idempotent ensure: try get; on NotFoundError, create.
+	try {
+		await client.mcpServerDef({ op: 'get', name: mcpName });
+	} catch (err) {
+		if (!(err instanceof NotFoundError)) {
+			throw err;
+		}
+		const createInput: SubstrateToolInput = {
+			op: 'create',
+			name: mcpName,
+			promote: true,
+			// transport / url / headers ride on the index-signature
+			// (SubstrateToolInput has `[extra: string]: unknown`).
+			transport,
+			url: mcpUrl,
+		};
+		if (Object.keys(headers).length > 0) createInput.headers = headers;
+		await client.mcpServerDef(createInput);
+	}
+
+	const envVars = extractEnvVarsFromHeaders(headersParam);
+	if (envVars.length > 0) {
+		this.logger.info?.(
+			`[LoomCycleMcpServerTool] MCP server ${mcpName} registered. Required env vars on loomcycle: ${envVars.join(', ')}`,
+		);
+	}
+
+	return {
+		client,
+		toolName,
+		toolDescription,
+		mcpName,
+		agent,
+		userIdDefault,
+		userTierDefault,
+		allowedToolGlob: `mcp__${mcpName}__*`,
+		cleanupOnEnd,
+	};
+}
+
+async function runMcpServerOp(
+	captures: McpCaptures,
+	args: z.infer<typeof McpServerInputSchema>,
+): Promise<string> {
+	const runOpts: RunOptions = {
+		agent: captures.agent,
+		segments: buildSegments(args.prompt, true), // model-supplied prompt → untrusted
+		allowedTools: [captures.allowedToolGlob],
+	};
+	if (captures.userIdDefault) runOpts.userId = captures.userIdDefault;
+	if (captures.userTierDefault) runOpts.userTier = captures.userTierDefault;
+
+	const result = await drainRunStream(captures.client.runStreaming(runOpts));
+	return result.finalText;
 }
 
 /**
