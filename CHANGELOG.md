@@ -2,6 +2,40 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-05-24
+
+Patch release. **Real fix for the `Spawn → Agent` dropdown**: now populated from the loomcycle agent library (yaml-static + dynamically-registered AgentDefs), not from per-user run history.
+
+### Fixed
+
+- **`loadAgents` now calls `client.listLibraryAgents()`** instead of `client.listUserAgents(userId)`. The library endpoint (`GET /v1/_library/agents`, shipped in loomcycle v0.9.3) merges yaml-declared agents and dynamic AgentDef registrations into one source-tagged envelope. Brand-new yaml agents that have never spawned now appear in the dropdown; dynamic-only registrations appear too.
+- **Each dropdown option carries a source-tag description** (yaml-static / dynamic AgentDef / yaml + dynamic) plus version metadata (`vN · N versions`). Operators can tell at a glance which definition is yaml-baseline vs. AgentDef-evolved.
+- **Operator-scoped lookup, no userId required.** The library endpoint is bearer-authed at operator-trust scope; the dropdown no longer depends on the credential's optional Default User ID setting.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.10.1` → `^0.10.3`. v0.10.3 is an adapter-only release ([loomcycle PR — adapter-only release](https://github.com/denn-gubsky/loomcycle)) that adds typed wrappers for the three Library v2 endpoints (`listLibraryAgents`, `listLibrarySkills`, `listLibraryMcpServers`). All three become available to future dropdowns; only `listLibraryAgents` is wired up in this release.
+- **Spawn field description rewritten** to reflect the new behaviour — points operators at the merged library and explains the source-tag descriptions.
+
+### Internal
+
+- `test/nodes/LoomCycle/loadOptions.test.ts` — replaced the `listUserAgents` mock with `listLibraryAgents`; added test cases for source-tag formatting, alphabetical sort, empty-library placeholder, and operator-scoped lookup (no userId requirement).
+- The previously-closed PR #11 (honest-UX patch that kept the misleading wire call) is superseded by this PR. Library v2 turned out to be available since loomcycle v0.9.3 — the adapter wrapper was the only missing piece, and that's what v0.10.3 ships.
+
+### Future work tracked (not in this release)
+
+`listLibrarySkills` and `listLibraryMcpServers` are now available on the adapter but not yet wired to any dropdown. Candidates for future use:
+- `LoomCycle → Skill Definition → List` / `Get` / `Promote` / `Retire` ops — their `name` parameter could populate from `listLibrarySkills`.
+- `LoomCycle → MCP Server Definition → Get` / `Rediscover` / `Retire` ops — same pattern via `listLibraryMcpServers`.
+- The `LoomCycleMcpServerTool` cluster sub-node's parent-canvas sniffer could fall back to the library list when no explicit MCP-Client-Tool sibling is found.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 202 passing + 4 skipped (added 2 cases covering source-tag rendering + operator-scoped lookup)
+- `npm run build` produces all 7 node paths
+
 ## [1.0.2] — 2026-05-23
 
 Patch release. **Fixes node-picker visibility on n8n 2.x** (reported as: package loads cleanly, all 7 nodes register, Community Nodes panel shows green check, but `LoomCycle`, `LoomCycle: Run Completed`, and `LoomCycle: Channel Message` don't appear when searched in the workflow canvas's general node-picker / trigger-picker).

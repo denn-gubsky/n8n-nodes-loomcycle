@@ -67,7 +67,7 @@ export const runOps: INodeProperties[] = [
 		required: true,
 		displayOptions: { show: { resource: ['run'], operation: ['spawn'] } },
 		description:
-			'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
+			'Agent to spawn — merged from loomcycle.yaml + AgentDef registry via the GET /v1/_library/agents endpoint. Each option\'s description tag (yaml-static / dynamic / yaml+dynamic) shows where the definition lives. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
 	{
 		displayName: 'Prompt',

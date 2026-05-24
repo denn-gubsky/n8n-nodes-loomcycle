@@ -1,5 +1,6 @@
 import type { ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
-import { getClient, getCredentialDefault } from './client';
+import type { LibraryEntry } from '@loomcycle/client';
+import { getClient } from './client';
 import { redactBearerFragments } from './errors';
 
 /**
@@ -24,27 +25,63 @@ function failedToLoadOption(label: string, err: unknown): INodePropertyOptions {
  */
 
 /**
- * List agent names currently active for the credential's default user_id.
- * Returns recent / running agent definitions visible via /v1/users/{id}/agents.
+ * Format a `LibraryEntry.source` field as an operator-facing description
+ * shown as the dropdown option's tooltip / secondary text. Library v2
+ * (loomcycle v0.9.3) tags every entry as yaml-static, dynamic-only, or
+ * both — exposing that lets operators tell a yaml-baseline agent from
+ * one created via AgentDef at a glance.
+ */
+function libraryEntryDescription(entry: LibraryEntry<unknown>): string {
+	const parts: string[] = [];
+	switch (entry.source) {
+		case 'static-only':
+			parts.push('yaml-static');
+			break;
+		case 'dynamic-only':
+			parts.push('dynamic AgentDef');
+			break;
+		case 'both':
+			parts.push('yaml + dynamic');
+			break;
+	}
+	if (typeof entry.latest_version === 'number') {
+		parts.push(`v${entry.latest_version}`);
+	}
+	if (entry.version_count > 0) {
+		parts.push(`${entry.version_count} version${entry.version_count === 1 ? '' : 's'}`);
+	}
+	return parts.join(' · ');
+}
+
+/**
+ * List spawnable agent names from the loomcycle agent library — both
+ * yaml-static AND dynamically-registered AgentDefs, merged into one
+ * source-tagged list. Wraps `client.listLibraryAgents()`
+ * (@loomcycle/client v0.10.3+, wrapping GET /v1/_library/agents from
+ * loomcycle v0.9.3+).
+ *
+ * Operator-trust scope: the library endpoint is bearer-only (no userId
+ * required), so this dropdown works regardless of the credential's
+ * Default User ID setting.
  */
 export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 	try {
-		const userId = await getCredentialDefault(this, 'userId');
-		if (!userId) {
+		const client = await getClient(this);
+		const resp = await client.listLibraryAgents();
+		const entries = [...resp.entries].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
 			return [
 				{
-					name: '— set Default User ID on the credential to enable dropdown, or type the agent name manually —',
+					name: '— no agents declared in loomcycle.yaml or AgentDef registry; type the agent name manually —',
 					value: '',
 				},
 			];
 		}
-		const client = await getClient(this);
-		const agents = await client.listUserAgents(userId);
-		const names = Array.from(new Set(agents.map((a) => a.agent))).sort();
-		if (names.length === 0) {
-			return [{ name: '— no running agents for this user; type the agent name manually —', value: '' }];
-		}
-		return names.map((name) => ({ name, value: name }));
+		return entries.map((entry) => ({
+			name: entry.name,
+			value: entry.name,
+			description: libraryEntryDescription(entry),
+		}));
 	} catch (err) {
 		return [failedToLoadOption('agents', err)];
 	}
