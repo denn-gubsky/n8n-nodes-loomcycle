@@ -227,6 +227,43 @@ describe('LoomcycleChatModel — LangChain wrapper around the LLM gateway', () =
 		expect(toolCalls).toEqual([{ name: 'calc', args: { expr: '2+2' } }]);
 	});
 
+	it('bindTools is defined so n8n Tools Agent recognises tool-calling support', async () => {
+		const model = buildModel();
+		// n8n's check is essentially `typeof model.bindTools === 'function'`.
+		expect(typeof model.bindTools).toBe('function');
+	});
+
+	it('bindTools forwards tools through this.bind so they land on options.tools at call time', async () => {
+		mockClient.llmChat.mockResolvedValue({
+			id: 'llm_07',
+			request_id: 'req_07',
+			provider: 'anthropic',
+			model: 'claude-sonnet-4-6',
+			content: [{ type: 'text', text: 'ok' }],
+			stop_reason: 'end_turn',
+			usage: { input_tokens: 1, output_tokens: 1 },
+		});
+		const model = buildModel();
+		// Pre-bind tools via the LangChain pattern; the returned Runnable
+		// should propagate the tools through to llmChat.
+		const bound = model.bindTools([
+			{
+				name: 'calc',
+				description: 'evaluate math',
+				input_schema: { type: 'object', properties: { expr: { type: 'string' } } },
+			},
+		]);
+		await bound.invoke([new HumanMessage('compute 2+2')]);
+		const opts = mockClient.llmChat.mock.calls[0][0];
+		expect(opts.tools).toEqual([
+			{
+				name: 'calc',
+				description: 'evaluate math',
+				input_schema: { type: 'object', properties: { expr: { type: 'string' } } },
+			},
+		]);
+	});
+
 	it('SECURITY — bearer fragments in error messages are redacted before reaching the caller', async () => {
 		mockClient.llmChat.mockRejectedValue(
 			new Error('Authorization: Bearer sk-leaked-fake-token-xyz123 was rejected'),
