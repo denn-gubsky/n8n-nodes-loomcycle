@@ -4,6 +4,7 @@
 
 | `n8n-nodes-loomcycle` | Min loomcycle | Min n8n | Min Node | Notes |
 |---|---|---|---|---|
+| `1.1.0` | `v0.10.x` | `1.82.0` | `20.15` | Minor — `LoomCycle Chat Model` cluster sub-node (5th sub-node); adapter `^0.11.0` for LLM Gateway endpoint |
 | `1.0.5` | `v0.9.3` | `1.82.0` | `20.15` | Patch — `manualTriggerFunction` honours SSE Transport in editor test mode; CI actions bumped to v5 |
 | `1.0.4` | `v0.9.3` | `1.82.0` | `20.15` | Patch — cluster sub-nodes ship both `supplyData()` + `execute()` (fixes n8n Tools Agent mode) |
 | `1.0.3` | `v0.9.3` | `1.82.0` | `20.15` | Patch — Spawn dropdown pulls the loomcycle agent library via `listLibraryAgents` (adapter `^0.10.3`) |
@@ -29,6 +30,7 @@
 | Channel listing (`GET /v1/_channels`) | `v0.9.x` (PR #173) |
 | User-runs SSE stream (`GET /v1/users/{id}/agents/stream`) | `v0.9.x` (PR #173) |
 | Library v2 (`GET /v1/_library/{agents,skills,mcp-servers}`) | `v0.9.3` — exposed via adapter `^0.10.3` |
+| **LLM Gateway (`POST /v1/_llm/chat`)** | `v0.10.x` — exposed via adapter `^0.11.0`; powers `LoomCycle Chat Model` sub-node |
 
 If you're on an older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 

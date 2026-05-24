@@ -1,0 +1,13 @@
+{
+	"node": "@loomcycle/n8n-nodes-loomcycle.loomCycleChatModel",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["AI"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/denn-gubsky/n8n-nodes-loomcycle#cluster-sub-nodes"
+			}
+		]
+	}
+}

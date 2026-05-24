@@ -1,6 +1,6 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "1.0.5",
+	"version": "1.1.0",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -54,6 +54,7 @@
 			"dist/nodes/LoomCycle/LoomCycle.node.js",
 			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
 			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js",
+			"dist/nodes/LoomCycleChatModel/LoomCycleChatModel.node.js",
 			"dist/nodes/LoomCycleMemoryTool/LoomCycleMemoryTool.node.js",
 			"dist/nodes/LoomCycleChannelTool/LoomCycleChannelTool.node.js",
 			"dist/nodes/LoomCycleSubAgentTool/LoomCycleSubAgentTool.node.js",
@@ -61,7 +62,7 @@
 		]
 	},
 	"dependencies": {
-		"@loomcycle/client": "^0.10.3"
+		"@loomcycle/client": "^0.11.0"
 	},
 	"peerDependencies": {
 		"@langchain/core": ">=0.3.0",
