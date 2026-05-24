@@ -15,7 +15,7 @@ import {
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { BaseLanguageModelInput } from '@langchain/core/language_models/base';
 import { ChatGeneration, ChatGenerationChunk, type ChatResult } from '@langchain/core/outputs';
-import type { Runnable } from '@langchain/core/runnables';
+import { type Runnable, RunnableBinding } from '@langchain/core/runnables';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import type {
 	LLMChatContent,
@@ -112,22 +112,33 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 	 * refuses to wire the workflow with the error "Tools Agent requires
 	 * Chat Model which supports Tools calling."
 	 *
-	 * The runtime path is straightforward: forward the tools array
-	 * through `this.bind()` so it lands on `options.tools` for every
-	 * subsequent invoke / stream call. Our `extractToolsFromOptions`
-	 * (in buildChatOptions) handles the actual normalisation of each
-	 * tool to the gateway's `LLMTool` shape at call time — same logic
-	 * is exercised whether the tools came via `bindTools` or via a
-	 * raw `options.tools` overlay, so we keep one conversion path.
+	 * Implementation note: we construct `RunnableBinding` directly
+	 * instead of going through `this.bind()`. The 1.1.1 release used
+	 * `this.bind({ tools })` and failed at runtime with `this.bind is
+	 * not a function` inside n8n's AI Agent — the Agent appears to
+	 * invoke `bindTools` in a context where the Runnable prototype
+	 * chain is not reliably preserved on `this`. Direct
+	 * `new RunnableBinding({ bound: this, kwargs, config })` matches
+	 * exactly what `Runnable.bind()` does internally (per
+	 * `@langchain/core/runnables/base.js:63`) and sidesteps the
+	 * problematic lookup.
+	 *
+	 * Runtime forwarding: tools land on `options.tools` for every
+	 * subsequent invoke / stream call. `extractToolsFromOptions`
+	 * (in buildChatOptions) normalises each tool to the gateway's
+	 * `LLMTool` shape at call time, so the same conversion path
+	 * handles both `bindTools`-bound calls and raw `options.tools`
+	 * overlays.
 	 */
 	override bindTools(
 		tools: BindToolsInput[],
 		kwargs?: Partial<BaseChatModelCallOptions>,
 	): Runnable<BaseLanguageModelInput, AIMessageChunk, BaseChatModelCallOptions> {
-		return this.bind({
-			tools,
-			...kwargs,
-		} as Partial<BaseChatModelCallOptions>);
+		return new RunnableBinding<BaseLanguageModelInput, AIMessageChunk, BaseChatModelCallOptions>({
+			bound: this,
+			kwargs: { tools, ...kwargs } as Partial<BaseChatModelCallOptions>,
+			config: {},
+		});
 	}
 
 	async _generate(
