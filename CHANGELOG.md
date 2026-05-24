@@ -2,6 +2,48 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-24
+
+**Minor release.** Adds the long-awaited fifth cluster sub-node: **`LoomCycle Chat Model`**, which plugs into n8n's AI Agent's Chat Model slot and routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`, substrate v0.10.x+, adapter `@loomcycle/client@^0.11.0`). Consumes the LLM Gateway endpoint that landed upstream in loomcycle following the cross-repo RFC.
+
+### Added
+
+- **`LoomCycle Chat Model`** cluster sub-node. Plugs into n8n's AI Agent's **Chat Model** slot (`outputs: [NodeConnectionTypes.AiLanguageModel]`). Exposes loomcycle's provider routing, auth substitution, retry, host allowlist, and per-user quota policy via a single n8n credential — replacing per-provider Chat Model nodes (Anthropic / OpenAI / Gemini / etc.) with a single routing-aware gateway shim.
+- **`nodes/_shared/langchainChatModel.ts`** — `LoomcycleChatModel` class extending LangChain's `BaseChatModel`. Implements both `_generate` (non-streaming via `client.llmChat`) and `_streamResponseChunks` (token-streaming via `client.llmStream`). Honours LangChain `bindTools` — tools passed via the AI Agent's options arrive on every call and are translated to the gateway's provider-agnostic `LLMTool` shape (substrate-side handles per-provider translation: Anthropic `input_schema` / OpenAI `function.parameters` / Gemini `function_declarations`).
+- **Node parameters:** Provider, Model, Tier, User ID, User Tier, Max Tokens, Temperature, Streaming. All routing hints are optional — empty values fall through to credential defaults or the resolver's automatic pick.
+- **`doc-internal/llm-gateway-request.md`** — the RFC document sent to the loomcycle team that drove the upstream `POST /v1/_llm/chat` design. Preserved here for historical reference.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.10.3` → `^0.11.0`. v0.11.0 adds the typed `llmChat()` + `llmStream()` methods wrapping the gateway endpoint. All existing methods (Channel CRUD / MCPServerDef / streamUserRunStates / etc.) remain unchanged.
+
+### What loomcycle provides via the new sub-node
+
+| Feature | How |
+|---|---|
+| **Single credential** | One `LoomCycle API` bearer; all provider auth lives in loomcycle's env. n8n no longer needs per-provider credentials. |
+| **Provider routing** | Loomcycle's resolver picks the provider / model at request time based on tier policy + availability + fallback rules. |
+| **Per-user quotas** | `userId` field feeds loomcycle's per-user quota policy — useful for multi-tenant n8n deployments. |
+| **Single audit log** | All LLM calls audit into loomcycle's `/v1/_events` log; no need to stitch logs across multiple provider dashboards. |
+| **Tool calling** | Provider-agnostic tool definitions translated to each provider's native format substrate-side. n8n AI Agent's Tools Agent mode works unchanged. |
+
+### Out of scope (still tracked upstream)
+
+The 1.1.0 release ships against the v0.10.x gateway endpoint's v1 surface. Items deferred upstream (and therefore not yet available via this sub-node):
+
+- `stop_sequences` parameter (deferred until loomcycle's providers package exposes the equivalent)
+- `user_bearer` template substitution (deferred until the gateway grows an MCP path)
+- Multi-modal content (image inputs) — text-only conversations in v1
+- `tool_choice` field (defaults to provider's `auto`)
+- Embedding endpoint (separate RFC pending)
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 219 passing + 4 skipped (was 210 + 4; added 9 new cases covering the LangChain wrapper + sub-node fixture)
+- `npm run build` produces all 8 node paths
+
 ## [1.0.5] — 2026-05-24
 
 Patch release. **Hygiene + docs + CI bump.** No wire-API changes; no operator workflow changes required.

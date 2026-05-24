@@ -21,7 +21,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Seven nodes plus one credential type.
+Eight nodes plus one credential type.
 
 ### Credential
 
@@ -44,6 +44,7 @@ Seven nodes plus one credential type.
 
 ### Cluster sub-nodes (plug into n8n's AI Agent)
 
+- **LoomCycle Chat Model** — plugs into the AI Agent's **Chat Model** slot. Routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`) instead of a direct provider SDK. Single credential covers all providers; loomcycle's resolver picks provider / model at request time; per-user quota tracking; single audit log. Supports tool calling (LangChain `bindTools` → gateway's provider-agnostic schema → substrate translates per-provider). **No agent loop** — this is the thin gateway shim, not the full runtime. Use **Sub-Agent Tool** below when you want the agent loop.
 - **LoomCycle Memory Tool** — exposes Memory read ops as a single discriminated tool the AI Agent can call.
 - **LoomCycle Channel Tool** — Channel publish + peek as agent tools.
 - **LoomCycle Sub-Agent Tool** — delegates to a configured loomcycle agent (drains `runStreaming`); the agent receives the parent's tool-call prompt and returns its `finalText`.
@@ -134,6 +135,7 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | `content_sha256` Verify op | v0.9.x | PR #175 |
 | **MCPServerDef substrate** (dynamic MCP) | **v0.9.2** | PR #177; required by `LoomCycleMcpServerTool` |
 | `parentAgentId` filter + `debug` toggle on streams | v0.9.2 | PR #181 |
+| **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` | **v0.10.x** | enables n8n AI Agent's Chat Model slot to route through loomcycle |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
@@ -146,7 +148,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^0.10.3`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.10.3 added typed wrappers for the Library v2 endpoints (`listLibraryAgents` / `listLibrarySkills` / `listLibraryMcpServers`), which power the Spawn agent dropdown.
+This package pins `@loomcycle/client` to `^0.11.0`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.11.0 added `llmChat()` + `llmStream()` typed wrappers around the LLM Gateway endpoint (`POST /v1/_llm/chat`, substrate v0.10.x+), powering the new `LoomCycle Chat Model` cluster sub-node.
 
 ### Verified deployments
 
