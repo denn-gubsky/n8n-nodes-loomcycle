@@ -10,9 +10,12 @@ import {
 	BaseChatModel,
 	type BaseChatModelCallOptions,
 	type BaseChatModelParams,
+	type BindToolsInput,
 } from '@langchain/core/language_models/chat_models';
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+import type { BaseLanguageModelInput } from '@langchain/core/language_models/base';
 import { ChatGeneration, ChatGenerationChunk, type ChatResult } from '@langchain/core/outputs';
+import type { Runnable } from '@langchain/core/runnables';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import type {
 	LLMChatContent,
@@ -100,6 +103,31 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 
 	get callKeys(): string[] {
 		return [...super.callKeys, 'tools'];
+	}
+
+	/**
+	 * Tool-calling capability advertisement. n8n's Tools Agent checks
+	 * for the presence of `bindTools` to decide whether a connected
+	 * Chat Model supports tool calls; without this override the Agent
+	 * refuses to wire the workflow with the error "Tools Agent requires
+	 * Chat Model which supports Tools calling."
+	 *
+	 * The runtime path is straightforward: forward the tools array
+	 * through `this.bind()` so it lands on `options.tools` for every
+	 * subsequent invoke / stream call. Our `extractToolsFromOptions`
+	 * (in buildChatOptions) handles the actual normalisation of each
+	 * tool to the gateway's `LLMTool` shape at call time — same logic
+	 * is exercised whether the tools came via `bindTools` or via a
+	 * raw `options.tools` overlay, so we keep one conversion path.
+	 */
+	override bindTools(
+		tools: BindToolsInput[],
+		kwargs?: Partial<BaseChatModelCallOptions>,
+	): Runnable<BaseLanguageModelInput, AIMessageChunk, BaseChatModelCallOptions> {
+		return this.bind({
+			tools,
+			...kwargs,
+		} as Partial<BaseChatModelCallOptions>);
 	}
 
 	async _generate(

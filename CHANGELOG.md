@@ -2,6 +2,25 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-05-24
+
+Patch release. **Fixes the `Tools Agent requires Chat Model which supports Tools calling` error** when wiring `LoomCycle Chat Model` into an AI Agent that has tools in its Tool slot.
+
+### Fixed
+
+- **`LoomcycleChatModel.bindTools` now explicitly implemented.** LangChain's `BaseChatModel.bindTools` is declared as optional (`bindTools?`) — subclasses opt into tool-calling support by providing an override. n8n's Tools Agent checks `typeof model.bindTools === 'function'` to detect tool-calling capability and refused to wire the workflow when the method was missing from our instance (1.1.0). The override forwards bound tools through `this.bind({ tools })` so they land on `options.tools` for every subsequent invoke/stream call — same conversion path our existing `extractToolsFromOptions` already handled at call time. No change to the runtime tool-translation logic; the fix is purely a capability advertisement.
+
+### Internal
+
+- 2 new test cases in `test/nodes/cluster/chatModel.test.ts` — one asserts `typeof model.bindTools === 'function'` (matching n8n's check), one verifies pre-bound tools propagate through to `client.llmChat`'s `options.tools`. Total: **221 passing + 4 skipped** (was 219 + 4).
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 221 passing + 4 skipped
+- `npm run build` produces all 8 node paths
+
 ## [1.1.0] — 2026-05-24
 
 **Minor release.** Adds the long-awaited fifth cluster sub-node: **`LoomCycle Chat Model`**, which plugs into n8n's AI Agent's Chat Model slot and routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`, substrate v0.10.x+, adapter `@loomcycle/client@^0.11.0`). Consumes the LLM Gateway endpoint that landed upstream in loomcycle following the cross-repo RFC.
