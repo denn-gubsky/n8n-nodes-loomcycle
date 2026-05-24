@@ -2,9 +2,7 @@ import {
 	AIMessage,
 	AIMessageChunk,
 	type BaseMessage,
-	HumanMessage,
-	SystemMessage,
-	ToolMessage,
+	type ToolMessage,
 } from '@langchain/core/messages';
 import {
 	BaseChatModel,
@@ -247,14 +245,15 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 				if (item.kind === 'content_block_stop') {
 					const block = toolBlocks.get(item.payload.index);
 					if (block) {
-						let parsedInput: Record<string, unknown> = {};
-						try {
-							parsedInput = block.partialJson ? JSON.parse(block.partialJson) : {};
-						} catch {
-							// Partial JSON failed to parse — emit invalid_tool_call so
-							// the parent agent can decide how to recover. LangChain's
-							// AIMessageChunk supports invalid_tool_calls natively.
-						}
+						// Emit ONLY `tool_call_chunks` — LangChain's
+						// AIMessageChunk.concat() reconstructs the final
+						// `tool_calls` from the accumulated chunks. Emitting
+						// both fields on the same chunk causes LangChain to
+						// double-count + can corrupt the id field during the
+						// accumulation, which downstream surfaces as the
+						// "messages[*].tool_call_id: tool message requires
+						// tool_call_id" gateway error when the agent's tool
+						// loop replays the ToolMessage back to us.
 						yield new ChatGenerationChunk({
 							text: '',
 							message: new AIMessageChunk({
@@ -263,15 +262,9 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 									{
 										id: block.id,
 										name: block.name,
-										args: block.partialJson,
+										args: block.partialJson || '{}',
 										index: item.payload.index,
-									},
-								],
-								tool_calls: [
-									{
-										id: block.id,
-										name: block.name,
-										args: parsedInput,
+										type: 'tool_call_chunk',
 									},
 								],
 							}),
@@ -350,41 +343,108 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 
 // ---- Message mapping ----
 
+// Exported for direct testing: invoke() coerces messages upstream of our
+// conversion, so unit tests need to call this helper directly to
+// exercise edge cases (broken prototype chain, missing _getType, etc).
+export { langchainToLoomcycleMessage as __langchainToLoomcycleMessageForTests };
+
 /**
  * Convert a LangChain `BaseMessage` to the gateway's `LLMChatMessage`.
  * Handles the four canonical message types (System / Human / AI / Tool)
  * + accumulates `AIMessage.tool_calls` into the gateway's `tool_calls`
  * field.
+ *
+ * Type detection uses `BaseMessage._getType()` rather than `instanceof`.
+ * Reason: n8n's worker-thread / IPC layer passes messages through
+ * serialization on some code paths, which breaks the prototype chain
+ * and makes `instanceof ToolMessage` return false even when the object
+ * IS semantically a tool message. The `_getType()` method (or its
+ * fallback shape checks below) survives the round-trip because n8n's
+ * LangChain layer preserves the method on the reconstructed instance.
+ * Lost type detection caused "messages[2].tool_call_id: tool message
+ * requires tool_call_id" gateway errors in the AI Agent's tool-loop
+ * (1.1.2 and earlier).
  */
 function langchainToLoomcycleMessage(msg: BaseMessage): LLMChatMessage {
-	if (msg instanceof SystemMessage) {
-		return { role: 'system', content: messageContentToString(msg.content) };
-	}
-	if (msg instanceof HumanMessage) {
-		return { role: 'user', content: messageContentToString(msg.content) };
-	}
-	if (msg instanceof AIMessage) {
-		const out: LLMChatMessage = { role: 'assistant', content: messageContentToString(msg.content) };
-		if (msg.tool_calls && msg.tool_calls.length > 0) {
-			out.tool_calls = msg.tool_calls.map((tc) => ({
-				id: tc.id ?? '',
-				name: tc.name,
-				input: (tc.args ?? {}) as Record<string, unknown>,
-			}));
+	const type = detectMessageType(msg);
+	const content = messageContentToString(msg.content);
+
+	switch (type) {
+		case 'system':
+			return { role: 'system', content };
+		case 'user':
+		case 'human':
+			return { role: 'user', content };
+		case 'assistant':
+		case 'ai': {
+			const out: LLMChatMessage = { role: 'assistant', content };
+			const aiMsg = msg as AIMessage;
+			if (aiMsg.tool_calls && aiMsg.tool_calls.length > 0) {
+				out.tool_calls = aiMsg.tool_calls.map((tc) => ({
+					id: tc.id ?? '',
+					name: tc.name,
+					input: (tc.args ?? {}) as Record<string, unknown>,
+				}));
+			}
+			return out;
 		}
-		return out;
+		case 'tool':
+		case 'function': {
+			const toolMsg = msg as ToolMessage;
+			// tool_call_id is REQUIRED by the gateway (it's how the AI
+			// turn correlates the result back to its tool_use call).
+			// If the upstream AIMessage's tool_call had no id (shouldn't
+			// happen with our gateway, but defensive), surface as empty
+			// string — the gateway will reject with a clear error which
+			// is preferable to silently misrouting the result.
+			return {
+				role: 'tool',
+				content,
+				tool_call_id: toolMsg.tool_call_id ?? '',
+			};
+		}
+		default:
+			// Safety net for unrecognised roles. Logged via toJSON so
+			// operators can debug if they see this branch fire.
+			return { role: 'user', content };
 	}
-	if (msg instanceof ToolMessage) {
-		return {
-			role: 'tool',
-			content: messageContentToString(msg.content),
-			tool_call_id: msg.tool_call_id,
-		};
+}
+
+/**
+ * Type detection for LangChain `BaseMessage` instances. Robust to
+ * prototype-chain loss (which happens at n8n's worker-thread boundary).
+ * Order of precedence:
+ *   1. `_getType()` — the canonical method, present on the prototype
+ *      of all BaseMessage subclasses. Survives serialization in most
+ *      LangChain layers because n8n re-hydrates via the LangChain
+ *      reviver.
+ *   2. Shape inspection — `tool_call_id` field implies a tool result;
+ *      `tool_calls` field implies an AI turn requesting tool use.
+ *   3. `role` / `type` fields — for OpenAI-style plain-object messages
+ *      that might come through custom workflows.
+ *   4. Default `'human'`.
+ */
+function detectMessageType(msg: BaseMessage): string {
+	const m = msg as unknown as {
+		_getType?: () => string;
+		tool_call_id?: string;
+		tool_calls?: unknown[];
+		role?: string;
+		type?: string;
+	};
+	if (typeof m._getType === 'function') {
+		try {
+			return m._getType();
+		} catch {
+			// Fall through to shape inspection — _getType can throw on
+			// re-hydrated instances where some private field is missing.
+		}
 	}
-	// Fallback: treat unrecognised roles as a user message with the
-	// content stringified. n8n's AI Agent emits the canonical four
-	// types, so this is a safety net for custom workflows.
-	return { role: 'user', content: messageContentToString(msg.content) };
+	if (typeof m.tool_call_id === 'string') return 'tool';
+	if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) return 'ai';
+	if (m.role) return m.role;
+	if (m.type) return m.type;
+	return 'human';
 }
 
 function messageContentToString(content: unknown): string {
