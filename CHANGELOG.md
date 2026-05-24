@@ -2,6 +2,25 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] — 2026-05-24
+
+Patch release. **Fixes `this.bind is not a function` runtime error** in n8n AI Agent when wiring `LoomCycle Chat Model` + any tool.
+
+### Fixed
+
+- **`LoomcycleChatModel.bindTools` now constructs `RunnableBinding` directly** instead of calling `this.bind({...})`. The 1.1.1 release wired up `bindTools` per the standard LangChain pattern (`return this.bind({ tools, ...kwargs })`), but at runtime inside n8n's AI Agent invocation flow, `this.bind` resolved to undefined and the workflow failed with:
+
+  > Problem in node 'AI Agent': this.bind is not a function
+
+  The new implementation matches exactly what `Runnable.bind()` does internally (per `@langchain/core/runnables/base.js`): `new RunnableBinding({ bound: this, kwargs, config: {} })`. Sidesteps the problematic `this.bind` lookup entirely. Same runtime tool-translation path as before — tools land on `options.tools` for every subsequent invoke/stream call, and our existing `extractToolsFromOptions` normalises them to the gateway's `LLMTool` shape.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 221 passing + 4 skipped (same as 1.1.1)
+- `npm run build` produces all 8 node paths
+
 ## [1.1.1] — 2026-05-24
 
 Patch release. **Fixes the `Tools Agent requires Chat Model which supports Tools calling` error** when wiring `LoomCycle Chat Model` into an AI Agent that has tools in its Tool slot.
