@@ -2,6 +2,33 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] — 2026-05-24
+
+Patch release. **Hygiene + docs + CI bump.** No wire-API changes; no operator workflow changes required.
+
+### Fixed
+
+- **`LoomCycle: Run Completed` trigger — editor test mode now honours the `Transport` setting.** When the operator clicks `Execute step` on the trigger node in the editor and `Transport: SSE (Push)` is selected, the manual path subscribes to `client.streamUserRunStates` for ~30s and emits the first live event — instead of falling back to `pollOnce` (which returned historical snapshot data because `workflowStaticData` doesn't persist between editor test runs). Polling mode still uses `pollOnce` (matches the "show me what would currently match" test-mode semantics). Production / published mode is unchanged — `runSseLoop` / `runPollLoop` continue to drive the persistent path.
+
+### Added
+
+- **`runSseListenOnce`** in `nodes/LoomCycleRunCompleted/helpers/sse.ts` — single-shot SSE subscriber with timeout. Emits the first matching event then returns; swallows close/open meta-frames; resolves cleanly on timeout abort.
+- **`README.md` — "Verified deployments" subsection** documenting the TrueNAS n8n `2.22.1` / direct-IP / sub-20 ms SSE round-trip validation from the 1.0.4 smoke test.
+- **`doc/SUPPORT.md` — Verified deployments table** + version compatibility rows for 1.0.1 through 1.0.5.
+
+### Changed
+
+- **GitHub Actions versions bumped:** `actions/checkout@v4` → `@v5`, `actions/setup-node@v4` → `@v5`, across `ci.yml` / `publish.yml` / `integration.yml`. Silences the Node 20 deprecation warning that started appearing on every workflow run after June 2026.
+- **README adapter pin documentation** updated to reflect `^0.10.3` (was `^0.9.2` in the README; the package itself had been on `^0.10.x` since 1.0.1).
+- **README n8n compatibility** notes the Tools Agent / dual-mode-cluster-sub-node story (introduced in 1.0.4).
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 210 passing + 4 skipped (was 207 + 4; added 3 new `runSseListenOnce` cases)
+- `npm run build` produces all 7 node paths
+
 ## [1.0.4] — 2026-05-24
 
 Patch release. **Fixes cluster sub-nodes on n8n's current Tools Agent (v1.82+)**: each of the 4 sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool) now implements both `supplyData()` (legacy LangChain-direct AI Agent modes) AND `execute()` (current Tools Agent mode), so they work across n8n versions.

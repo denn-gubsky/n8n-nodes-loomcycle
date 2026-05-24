@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runSseLoop } from '../../../nodes/LoomCycleRunCompleted/helpers/sse';
+import { runSseLoop, runSseListenOnce } from '../../../nodes/LoomCycleRunCompleted/helpers/sse';
 
 /**
  * Build an async-iterable that yields the given items + then aborts the
@@ -171,6 +171,88 @@ describe('runSseLoop', () => {
 		expect(ctx.emitError).toHaveBeenCalledTimes(1);
 		// And streamUserRunStates was retried up to the cap.
 		expect(streamUserRunStates).toHaveBeenCalledTimes(5);
+	});
+
+	it('runSseListenOnce emits FIRST event then returns', async () => {
+		const events = [
+			{ kind: 'event' as const, payload: { run_id: 'r1', status: 'completed', ts: 't1' } },
+			{ kind: 'event' as const, payload: { run_id: 'r2', status: 'completed', ts: 't2' } },
+		];
+		// Iterable that yields then ends — runSseListenOnce returns after
+		// the first 'event' kind, so the second yield is effectively dead
+		// code (kept here to verify the function exits early).
+		const streamUserRunStates = vi.fn(() => ({
+			async *[Symbol.asyncIterator]() {
+				for (const e of events) yield e;
+			},
+		}));
+		const ctx = makeCtx();
+
+		await runSseListenOnce.call(ctx as unknown as LoopThis, {
+			client: { streamUserRunStates } as unknown as Parameters<typeof runSseListenOnce>[0]['client'],
+			userId: 'u1',
+			statuses: ['completed'],
+			timeoutMs: 5000,
+		});
+
+		expect(ctx.emit).toHaveBeenCalledTimes(1);
+		const emittedRow = ctx.emit.mock.calls[0][0] as unknown[][];
+		expect(emittedRow[0][0]).toMatchObject({ run_id: 'r1' });
+	});
+
+	it('runSseListenOnce times out cleanly without emitting when no event arrives', async () => {
+		// Stream that pauses indefinitely — listener should abort via
+		// timeout. Use a deferred promise so the iterator stays open.
+		const streamUserRunStates = vi.fn(
+			() =>
+				({
+					async *[Symbol.asyncIterator]() {
+						// Wait forever — until the AbortSignal forces the adapter
+						// to throw (real adapter propagates AbortError). Here we
+						// simulate that by yielding nothing and never resolving;
+						// the listener's setTimeout fires + aborts.
+						await new Promise<void>((_, reject) => {
+							setTimeout(() => reject(new DOMException('aborted', 'AbortError')), 50);
+						});
+					},
+				}) as AsyncIterable<unknown>,
+		);
+		const ctx = makeCtx();
+
+		await runSseListenOnce.call(ctx as unknown as LoopThis, {
+			client: { streamUserRunStates } as unknown as Parameters<typeof runSseListenOnce>[0]['client'],
+			userId: 'u1',
+			statuses: [],
+			timeoutMs: 30, // very short for fast test
+		});
+
+		// Aborted → no emits; the helper swallows the AbortError silently.
+		expect(ctx.emit).not.toHaveBeenCalled();
+	});
+
+	it('runSseListenOnce ignores close meta-frames and waits for a real event', async () => {
+		const items = [
+			{ kind: 'close' as const, payload: { reason: 'eof' } },
+			{ kind: 'open' as const, payload: {} },
+			{ kind: 'event' as const, payload: { run_id: 'r-real', status: 'completed', ts: 'tx' } },
+		];
+		const streamUserRunStates = vi.fn(() => ({
+			async *[Symbol.asyncIterator]() {
+				for (const i of items) yield i;
+			},
+		}));
+		const ctx = makeCtx();
+
+		await runSseListenOnce.call(ctx as unknown as LoopThis, {
+			client: { streamUserRunStates } as unknown as Parameters<typeof runSseListenOnce>[0]['client'],
+			userId: 'u1',
+			statuses: [],
+			timeoutMs: 5000,
+		});
+
+		expect(ctx.emit).toHaveBeenCalledTimes(1);
+		const emittedRow = ctx.emit.mock.calls[0][0] as unknown[][];
+		expect(emittedRow[0][0]).toMatchObject({ run_id: 'r-real' });
 	});
 
 	it('resets the consecutive-failure counter after a clean stream close', async () => {

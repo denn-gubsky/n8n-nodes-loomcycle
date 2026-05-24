@@ -8,7 +8,7 @@ import type { AgentStatus } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
 import { wrapLoomcycleError } from '../LoomCycle/helpers/errors';
-import { runSseLoop } from './helpers/sse';
+import { runSseLoop, runSseListenOnce } from './helpers/sse';
 import { runPollLoop, pollOnce } from './helpers/poll';
 
 /**
@@ -173,15 +173,32 @@ export class LoomCycleRunCompleted implements INodeType {
 			});
 		}
 
-		// Single-shot path used when the operator clicks "Listen for Test
-		// Event" in the n8n editor. We resolve as soon as the first event
-		// lands, then close.
+		// Single-shot path used when the operator clicks "Execute step" /
+		// "Listen for Test Event" in the n8n editor. Routes by Transport:
+		//   - sse:  briefly subscribe and emit the next live event (30s
+		//           window), so editor test mode actually exercises the
+		//           SSE wire path the operator selected.
+		//   - poll: one pollOnce iteration — emits a snapshot of currently-
+		//           matching rows. workflowStaticData doesn't persist
+		//           between editor test runs, so dedup is best-effort here
+		//           (it's authoritative only in production / published
+		//           mode).
 		async function manualTriggerFunction(this: ITriggerFunctions): Promise<void> {
+			if (mode === 'sse') {
+				await runSseListenOnce.call(this, {
+					client,
+					userId,
+					statuses,
+					parentAgentId,
+					agent,
+					timeoutMs: 30_000,
+				});
+				return;
+			}
 			const oneShotAc = new AbortController();
-			const userIdInner = userId;
 			await pollOnce.call(this, {
 				client,
-				userId: userIdInner,
+				userId,
 				statuses: statuses as AgentStatus[],
 				parentAgentId,
 				intervalMs: 0,

@@ -140,12 +140,27 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 ### n8n version compatibility
 
 - **Minimum:** n8n `1.82.0` (cluster-node API stability threshold)
-- **Tested against:** n8n latest
+- **Tested against:** n8n `2.22.1` (self-hosted Docker)
+- **Tools Agent path:** requires n8n v1.82+ (cluster sub-nodes ship both `supplyData()` and `execute()` so they work across older modes too)
 - **Node.js:** ≥ 20.15
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^0.9.2`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump.
+This package pins `@loomcycle/client` to `^0.10.3`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.10.3 added typed wrappers for the Library v2 endpoints (`listLibraryAgents` / `listLibrarySkills` / `listLibraryMcpServers`), which power the Spawn agent dropdown.
+
+### Verified deployments
+
+The integration has been smoke-tested end-to-end against the following configuration:
+
+| Surface | What was validated |
+|---|---|
+| **Action node — `Run → Spawn`** | Picks an agent from the library dropdown (yaml-static + dynamic AgentDef entries, source-tagged), spawns via `runStreaming`, drains the final text + usage + stopReason into the workflow output |
+| **Action node — `Channel → List`** | Lists declared channels (read-only credential smoke test) |
+| **Trigger — `Run Completed` (SSE)** | Workflow published → SSE held open → loomcycle pushes terminal-state events; executions land within ~10-20 ms (real push, not poll) |
+| **Cluster sub-node — `Memory Tool` inside n8n AI Agent** | Anthropic Chat Model + LoomCycle Memory Tool wired to the AI Agent's Tool slot; LLM calls the tool (`op: listScopes`), receives `{scopes: [...]}`, writes a natural-language summary |
+| **Network path** | TrueNAS-hosted n8n Docker → direct IP to loomcycle (Tailscale MagicDNS bypassed) → sub-20 ms SSE round-trips, sub-second tool calls |
+
+For deployments behind reverse proxies / Cloudflare workers that strip long-lived connections, switch the `Run Completed` trigger's **Transport** parameter to `Polling` — same data, slower latency, no SSE dependency.
 
 ## Troubleshooting
 

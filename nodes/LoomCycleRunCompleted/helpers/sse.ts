@@ -29,6 +29,59 @@ export interface SseOptions {
 	reconnectBackoffMs: number;
 }
 
+/**
+ * Single-shot SSE listen for n8n's editor "Execute step" / manual
+ * trigger path (n8n calls this via `manualTriggerFunction`). Subscribes
+ * to `streamUserRunStates`, emits the FIRST `kind === "event"` row that
+ * arrives via `this.emit`, then resolves. Times out cleanly without
+ * emitting after `timeoutMs` so the editor regains control instead of
+ * hanging indefinitely when no live run completes in the window.
+ *
+ * Why a dedicated helper (not just runSseLoop with `signal.abort()` on
+ * first emit): we want a tight scope-of-life — no reconnect attempts,
+ * no auto-backoff, no debug/close meta emits. The editor test mode is
+ * "wait for the next real event, then quit." Anything else is noise.
+ */
+export interface SseListenOnceOptions {
+	client: LoomcycleClient;
+	userId: string;
+	statuses: string[];
+	parentAgentId?: string;
+	agent?: string;
+	timeoutMs: number;
+}
+
+export async function runSseListenOnce(
+	this: ITriggerFunctions,
+	opts: SseListenOnceOptions,
+): Promise<void> {
+	const ac = new AbortController();
+	const timer = setTimeout(() => ac.abort(), opts.timeoutMs);
+	try {
+		for await (const item of opts.client.streamUserRunStates(opts.userId, {
+			statuses: opts.statuses.length > 0 ? opts.statuses : undefined,
+			agent: opts.agent,
+			parentAgentId: opts.parentAgentId,
+			signal: ac.signal,
+		})) {
+			if (item.kind === 'event') {
+				this.emit([this.helpers.returnJsonArray([item.payload as unknown as IDataObject])]);
+				return;
+			}
+			// close/open meta items: ignore in test mode — they're transport
+			// telemetry, not real trigger events.
+		}
+	} catch (err) {
+		// Clean timeout fires AbortError via the adapter's signal handling;
+		// swallow it (no emit, editor returns control). Re-throw any other
+		// failure (auth, network, etc.) so the editor surfaces it.
+		if (ac.signal.aborted) return;
+		throw err;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 export async function runSseLoop(this: ITriggerFunctions, opts: SseOptions): Promise<void> {
 	let attempt = 0;
 	while (!opts.signal.aborted) {
