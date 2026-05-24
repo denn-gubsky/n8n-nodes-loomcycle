@@ -74,25 +74,23 @@ export class LoomCycleChatModel implements INodeType {
 				name: 'provider',
 				type: 'string',
 				default: '',
-				placeholder: 'e.g. anthropic / openai / deepseek / ollama',
 				description:
-					'Optional provider pin. Empty = let loomcycle\'s resolver pick. Combine with Model to force an exact pin.',
+					'Optional provider pin. Empty = let loomcycle\'s resolver pick. Must match a provider configured in your loomcycle.yaml (the value the resolver knows internally) — common values: anthropic / openai / deepseek / ollama, but the actual list depends on your operator deployment.',
 			},
 			{
 				displayName: 'Model',
 				name: 'model',
 				type: 'string',
 				default: '',
-				placeholder: 'e.g. claude-sonnet-4-6 / gpt-4o / deepseek-v4-pro',
-				description: 'Optional model ID pin. Empty = let the resolver pick within the chosen provider (or globally if Provider is also empty).',
+				description: 'Optional model ID pin. Empty = let the resolver pick within the chosen provider (or globally if Provider is also empty). Must match a model ID the chosen provider knows — refer to the model IDs declared in your loomcycle.yaml or the provider\'s API documentation.',
 			},
 			{
 				displayName: 'Tier',
 				name: 'tier',
 				type: 'string',
 				default: '',
-				placeholder: 'default / pro / free',
-				description: 'Tier for resolver dispatch policy. Empty = "default".',
+				description:
+					'Tier label for resolver dispatch policy. Loomcycle tiers are operator-defined in loomcycle.yaml — whatever your deployment configured. Empty = the resolver\'s default tier. Common conventions are "default" / "pro" / "free" but operators are free to name tiers anything (e.g. "internal", "premium", "research").',
 			},
 			{
 				displayName: 'User ID',
@@ -107,7 +105,8 @@ export class LoomCycleChatModel implements INodeType {
 				name: 'userTier',
 				type: 'string',
 				default: '',
-				description: 'Per-user tier overlay; takes precedence over Tier when set. Empty = fall through to Tier / credential default.',
+				description:
+					'Per-user tier overlay (same naming convention as Tier — operator-defined in loomcycle.yaml). Takes precedence over Tier when set. Empty = fall through to Tier / credential default.',
 			},
 			{
 				displayName: 'Max Tokens',

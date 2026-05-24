@@ -14,7 +14,10 @@ vi.mock('@loomcycle/client', async (importActual) => {
 });
 
 import { LoomCycleChatModel } from '../../../nodes/LoomCycleChatModel/LoomCycleChatModel.node';
-import { LoomcycleChatModel } from '../../../nodes/_shared/langchainChatModel';
+import {
+	LoomcycleChatModel,
+	__langchainToLoomcycleMessageForTests as langchainToLoomcycleMessage,
+} from '../../../nodes/_shared/langchainChatModel';
 import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
 
 beforeEach(() => {
@@ -262,6 +265,56 @@ describe('LoomcycleChatModel — LangChain wrapper around the LLM gateway', () =
 				input_schema: { type: 'object', properties: { expr: { type: 'string' } } },
 			},
 		]);
+	});
+
+	// ---- Direct conversion tests (bypass LangChain's input coercion) ----
+	// These exercise langchainToLoomcycleMessage directly so we can cover
+	// the IPC-degraded shapes that LangChain's invoke() would reject
+	// upstream of our code.
+
+	describe('langchainToLoomcycleMessage — robust to broken prototype chains', () => {
+		it('routes a ToolMessage with intact _getType() correctly', () => {
+			const msg = new ToolMessage({ content: '42', tool_call_id: 'call_xyz' });
+			const out = langchainToLoomcycleMessage(msg);
+			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
+		});
+
+		it('routes a plain object via _getType() when instanceof fails', () => {
+			// Simulate n8n worker-thread reconstruction: _getType still
+			// works (it's on the prototype LangChain rehydrates) but
+			// `instanceof ToolMessage` returns false.
+			const fakeMsg = {
+				content: '42',
+				tool_call_id: 'call_xyz',
+				_getType: () => 'tool',
+			} as unknown as ToolMessage;
+			const out = langchainToLoomcycleMessage(fakeMsg);
+			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
+		});
+
+		it('routes a tool-shaped plain object via shape inspection when _getType is missing entirely', () => {
+			// Worst case: prototype chain completely lost (no _getType
+			// method, no class identity). We fall back to detecting the
+			// tool_call_id field as the signal.
+			const fakeMsg = {
+				content: '42',
+				tool_call_id: 'call_xyz',
+			} as unknown as ToolMessage;
+			const out = langchainToLoomcycleMessage(fakeMsg);
+			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
+		});
+
+		it('preserves AIMessage tool_calls round-trip via shape inspection', () => {
+			const fakeMsg = {
+				content: '',
+				tool_calls: [{ id: 'c1', name: 'calc', args: { x: 1 } }],
+			} as unknown as AIMessage;
+			const out = langchainToLoomcycleMessage(fakeMsg);
+			expect(out).toMatchObject({
+				role: 'assistant',
+				tool_calls: [{ id: 'c1', name: 'calc', input: { x: 1 } }],
+			});
+		});
 	});
 
 	it('SECURITY — bearer fragments in error messages are redacted before reaching the caller', async () => {

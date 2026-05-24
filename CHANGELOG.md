@@ -2,6 +2,33 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] — 2026-05-24
+
+Patch release. **Fixes `messages[*].tool_call_id: tool message requires tool_call_id` gateway error** during AI Agent tool-loop turns, plus tightens streaming tool-call emission and clarifies operator-facing parameter descriptions.
+
+### Fixed
+
+- **Message-type detection now uses `_getType()` instead of `instanceof`.** The previous `instanceof ToolMessage` / `HumanMessage` / etc. checks failed when LangChain messages crossed n8n's worker-thread / IPC boundary — the prototype chain breaks on the receiving side. Misclassified messages fell through to the catch-all `'user'` branch OR (worse) routed as `'tool'` with an empty `tool_call_id`, causing the gateway to reject the request mid-conversation with the cited error. The fix: detect via `BaseMessage._getType()` (a method on the prototype that returns a stable string tag like `'tool'` / `'human'` / `'ai'`), with a defensive shape-inspection fallback (presence of `tool_call_id` ⇒ `'tool'`, presence of `tool_calls` ⇒ `'ai'`) for the edge case where the prototype chain is completely lost.
+- **Streaming tool-call emission simplified.** Previously emitted both `tool_call_chunks` AND `tool_calls` on the same `content_block_stop` chunk. LangChain's `AIMessageChunk.concat()` accumulation could double-process this combination and corrupt the resulting tool-call `id` field — which then propagated downstream as the empty `tool_call_id` that hit the gateway-reject path. Now emits only `tool_call_chunks` with `type: 'tool_call_chunk'`; LangChain reconstructs the final `tool_calls` cleanly from the chunks.
+
+### Changed
+
+- **`LoomCycle Chat Model` parameter descriptions rewritten** for operator clarity:
+  - `Provider` / `Model`: no longer suggests `"anthropic / openai / deepseek / ollama"` as if it's a closed list. Descriptions now explain that values come from the operator's loomcycle.yaml resolver config; the examples are just common conventions.
+  - `Tier` / `User Tier`: removed the misleading `default / pro / free` placeholder. Loomcycle tiers are operator-defined in yaml (could be `internal`, `premium`, `research`, anything). Description updated to reflect that.
+  - All routing-hint descriptions clarify that the canonical values depend on operator deployment, not a fixed enum in this package.
+
+### Internal
+
+- Exported `langchainToLoomcycleMessage` as `__langchainToLoomcycleMessageForTests` so unit tests can directly exercise the conversion function on IPC-degraded message shapes (LangChain's `invoke()` validates inputs upstream of our conversion, blocking the test path through the model). 4 new direct-conversion test cases cover: intact-prototype ToolMessage, `_getType()`-present plain object, fully-prototype-lost shape-only object, and AIMessage `tool_calls` round-trip via shape inspection.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 225 passing + 4 skipped (was 221 + 4; +4 conversion-helper coverage cases)
+- `npm run build` produces all 8 node paths
+
 ## [1.1.2] — 2026-05-24
 
 Patch release. **Fixes `this.bind is not a function` runtime error** in n8n AI Agent when wiring `LoomCycle Chat Model` + any tool.
