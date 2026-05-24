@@ -17,6 +17,8 @@ import { LoomCycleChatModel } from '../../../nodes/LoomCycleChatModel/LoomCycleC
 import {
 	LoomcycleChatModel,
 	__langchainToLoomcycleMessageForTests as langchainToLoomcycleMessage,
+	__generateToolCallIdForTests as generateToolCallId,
+	__ensureNonEmptyToolCallIdForTests as ensureNonEmptyToolCallId,
 } from '../../../nodes/_shared/langchainChatModel';
 import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
 
@@ -314,6 +316,36 @@ describe('LoomcycleChatModel — LangChain wrapper around the LLM gateway', () =
 				role: 'assistant',
 				tool_calls: [{ id: 'c1', name: 'calc', input: { x: 1 } }],
 			});
+		});
+
+		it('substitutes a synthetic tool_call_id when ToolMessage has empty id (defensive)', () => {
+			const fakeMsg = {
+				content: '42',
+				tool_call_id: '',
+				_getType: () => 'tool',
+			} as unknown as ToolMessage;
+			const out = langchainToLoomcycleMessage(fakeMsg);
+			expect(out.role).toBe('tool');
+			expect(out.content).toBe('42');
+			// tool_call_id is non-empty (synthetic), starts with 'tool_'
+			expect(out.tool_call_id).toMatch(/^tool_[a-z0-9]{6,}$/);
+		});
+	});
+
+	describe('Tool-call id helpers', () => {
+		it('generateToolCallId returns non-empty short identifier', () => {
+			const id = generateToolCallId();
+			expect(id).toMatch(/^tool_[a-z0-9]{6,}$/);
+			expect(id.length).toBeGreaterThanOrEqual(11);
+		});
+
+		it('ensureNonEmptyToolCallId passes through non-empty input', () => {
+			expect(ensureNonEmptyToolCallId('call_abc')).toBe('call_abc');
+		});
+
+		it('ensureNonEmptyToolCallId generates synthetic id when input is undefined / empty', () => {
+			expect(ensureNonEmptyToolCallId(undefined)).toMatch(/^tool_[a-z0-9]+$/);
+			expect(ensureNonEmptyToolCallId('')).toMatch(/^tool_[a-z0-9]+$/);
 		});
 	});
 

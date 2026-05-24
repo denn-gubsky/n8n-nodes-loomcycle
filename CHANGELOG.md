@@ -2,6 +2,52 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] — 2026-05-24
+
+Patch release. **Defence-in-depth fix for `messages[*].tool_call_id` gateway rejection** — adds synthetic tool-call id generation at every wire boundary where the id could be empty.
+
+### Background
+
+v1.1.3 attempted to fix this via `_getType()`-based message detection + simplified streaming tool-call emission. The error persisted on the operator's TrueNAS deployment, which led to a deeper investigation of LangChain's tool-call reconstruction logic.
+
+### Root cause (confirmed)
+
+LangChain's `AIMessageChunk` constructor (`@langchain/core/messages/ai.js:178`) explicitly rejects tool calls with empty/missing `id`:
+
+```javascript
+if (!id || parsedArgs === null || ...) {
+    throw new Error("Malformed tool call chunk args.");
+}
+// → tool call goes into invalid_tool_calls, NOT tool_calls
+```
+
+When the empty-id tool call lands in `invalid_tool_calls`, the AI Agent's Tools Agent still runs the tool but creates a `ToolMessage` with empty `tool_call_id`. That message then flows into our gateway request and trips the substrate-side validator with `messages[*].tool_call_id: tool message requires tool_call_id`.
+
+Why did the id arrive empty? Could be a substrate-side gateway behaviour (we couldn't observe the wire from this side), or a LangChain accumulation edge case. Either way, our package can defend against both.
+
+### Fixed
+
+- **Synthetic id generation at every wire boundary.** New helpers `generateToolCallId()` + `ensureNonEmptyToolCallId()` in `langchainChatModel.ts`. Applied at:
+  - **Streaming `content_block_start`** (`_streamResponseChunks`): if the gateway-emitted `id` is empty, substitute a synthetic `tool_<hex>` id. Logs a warning via `console.warn` so operators see the path is firing.
+  - **Non-streaming `chatResponseToAIMessage`** (`_generate`): same defensive substitution on the tool_use content blocks of the response.
+  - **`langchainToLoomcycleMessage` tool-message conversion**: last-line-of-defence — if a `ToolMessage` somehow reaches us with empty `tool_call_id`, substitute a synthetic id to avoid the gateway-reject path. The round-trip won't correlate cleanly in that pathological case but the request will succeed (preferable to a hard failure).
+
+### Internal
+
+- Helpers exported as `__generateToolCallIdForTests` + `__ensureNonEmptyToolCallIdForTests` for direct unit coverage.
+- 4 new test cases (synthetic-id format, pass-through behaviour, empty-input fallback, ToolMessage empty-id substitution). Total: **229 passing + 4 skipped** (was 225 + 4).
+
+### Diagnostic notes
+
+The `console.warn` lines fire ONLY when the defensive substitution kicks in. If operators see them in n8n's logs, that's a signal something upstream is emitting empty ids — file a substrate-side issue against loomcycle so we can pin down whether it's a gateway emit issue or an accumulation edge case.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 229 passing + 4 skipped
+- `npm run build` produces all 8 node paths
+
 ## [1.1.3] — 2026-05-24
 
 Patch release. **Fixes `messages[*].tool_call_id: tool message requires tool_call_id` gateway error** during AI Agent tool-loop turns, plus tightens streaming tool-call emission and clarifies operator-facing parameter descriptions.

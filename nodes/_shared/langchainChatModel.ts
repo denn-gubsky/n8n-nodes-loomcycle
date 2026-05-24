@@ -219,7 +219,7 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 					const block = item.payload.block;
 					if (block.type === 'tool_use') {
 						toolBlocks.set(item.payload.index, {
-							id: block.id,
+							id: ensureNonEmptyToolCallId(block.id),
 							name: block.name,
 							partialJson: '',
 						});
@@ -341,12 +341,47 @@ export class LoomcycleChatModel extends BaseChatModel<BaseChatModelCallOptions> 
 	}
 }
 
+// ---- Tool-call id helpers ----
+
+/**
+ * Generate a synthetic, non-empty tool-call id. Used as a defensive
+ * fallback when the upstream wire (gateway → stream / non-stream
+ * response) omits the id or returns an empty string. LangChain's
+ * AIMessageChunk reconstruction rejects empty ids and routes the tool
+ * call into `invalid_tool_calls` (see
+ * @langchain/core/messages/ai.js:178), which then causes the AI
+ * Agent's Tools Agent to create a ToolMessage with empty tool_call_id
+ * — which our gateway in turn rejects with
+ * `messages[*].tool_call_id: tool message requires tool_call_id`.
+ *
+ * Format: `tool_<10-hex-chars>`. Matches the substrate's `tool_call_`
+ * convention closely enough that operators recognise it; uniquely
+ * identifies the call within a single conversation. The id is only
+ * used by LangChain to correlate tool_use (assistant turn) with
+ * tool_result (next turn) — the gateway accepts any non-empty string.
+ */
+function generateToolCallId(): string {
+	return `tool_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function ensureNonEmptyToolCallId(id: string | undefined): string {
+	if (typeof id === 'string' && id.length > 0) return id;
+	const synthetic = generateToolCallId();
+	// eslint-disable-next-line no-console
+	console.warn(
+		`[LoomcycleChatModel] gateway tool_use block had empty/missing id; substituting synthetic "${synthetic}" so LangChain's tool-call reconstruction doesn't drop it. If this happens consistently, file a substrate-side issue against loomcycle.`,
+	);
+	return synthetic;
+}
+
 // ---- Message mapping ----
 
 // Exported for direct testing: invoke() coerces messages upstream of our
 // conversion, so unit tests need to call this helper directly to
 // exercise edge cases (broken prototype chain, missing _getType, etc).
 export { langchainToLoomcycleMessage as __langchainToLoomcycleMessageForTests };
+export { generateToolCallId as __generateToolCallIdForTests };
+export { ensureNonEmptyToolCallId as __ensureNonEmptyToolCallIdForTests };
 
 /**
  * Convert a LangChain `BaseMessage` to the gateway's `LLMChatMessage`.
@@ -391,17 +426,25 @@ function langchainToLoomcycleMessage(msg: BaseMessage): LLMChatMessage {
 		case 'tool':
 		case 'function': {
 			const toolMsg = msg as ToolMessage;
-			// tool_call_id is REQUIRED by the gateway (it's how the AI
-			// turn correlates the result back to its tool_use call).
-			// If the upstream AIMessage's tool_call had no id (shouldn't
-			// happen with our gateway, but defensive), surface as empty
-			// string — the gateway will reject with a clear error which
-			// is preferable to silently misrouting the result.
-			return {
-				role: 'tool',
-				content,
-				tool_call_id: toolMsg.tool_call_id ?? '',
-			};
+			// tool_call_id is REQUIRED by the gateway — it's how the AI
+			// turn correlates this result back to the originating
+			// tool_use call. If empty (LangChain's tool-call
+			// reconstruction can drop the id when the upstream chunks
+			// have empty/missing ids — we handle that with synthetic
+			// ids on the assistant side), generate a fresh synthetic
+			// id rather than send empty and hit the gateway-reject path.
+			// This is a last-line-of-defence; the upstream
+			// ensureNonEmptyToolCallId in chunks should prevent reaching
+			// here with empty ids in normal operation.
+			const tcId = toolMsg.tool_call_id ?? '';
+			if (tcId.length === 0) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`[LoomcycleChatModel] ToolMessage has empty tool_call_id (assistant turn likely lost the id during accumulation). Sending synthetic id to avoid gateway rejection — the round-trip won't correlate cleanly but the request will succeed.`,
+				);
+				return { role: 'tool', content, tool_call_id: generateToolCallId() };
+			}
+			return { role: 'tool', content, tool_call_id: tcId };
 		}
 		default:
 			// Safety net for unrecognised roles. Logged via toJSON so
@@ -482,7 +525,7 @@ function chatResponseToAIMessage(resp: {
 	const text = joinTextContent(resp.content);
 	const toolCalls = resp.content
 		.filter((c): c is { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> } => c.type === 'tool_use')
-		.map((c) => ({ id: c.id, name: c.name, args: c.input }));
+		.map((c) => ({ id: ensureNonEmptyToolCallId(c.id), name: c.name, args: c.input }));
 
 	return new AIMessage({
 		content: text,
