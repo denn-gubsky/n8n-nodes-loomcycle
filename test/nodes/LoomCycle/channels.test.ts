@@ -280,6 +280,28 @@ describe('LoomCycle resource=channel', () => {
 			expect(opts.semantic).toBeUndefined();
 			expect(opts.max_messages).toBeUndefined();
 		});
+
+		// REGRESSION: pre-fix, the updateChannel path forwarded the n8n
+		// collection's default value (0) for both defaultTtl and
+		// maxMessages even when the operator hadn't touched them. That
+		// silently destroyed previously-configured TTL/cap on the
+		// substrate side. Fix: guard `> 0` to omit zero-valued defaults.
+		it('REGRESSION — empty updateSettings does NOT forward 0 for default_ttl / max_messages', async () => {
+			mockClient.updateChannel.mockResolvedValue({ name: 'events', source: 'runtime', message_count: 0 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'channel',
+					operation: 'updateChannel',
+					channelName: 'events',
+					updateSettings: {},
+				},
+			});
+			await node.execute.call(ctx);
+			const [, opts] = mockClient.updateChannel.mock.calls[0];
+			expect(opts.default_ttl).toBeUndefined();
+			expect(opts.max_messages).toBeUndefined();
+		});
 	});
 
 	describe('Delete Channel', () => {

@@ -13,6 +13,7 @@ import {
 	NotFoundError,
 	NotPausedError,
 	PauseNotConfiguredError,
+	PerUserQuotaExhaustedError,
 	SessionBusyError,
 	SessionNotFoundError,
 	SnapshotNotFoundError,
@@ -120,6 +121,23 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 		return new NodeApiError(node, jsonifyError(err), {
 			message: 'Backpressure — too many in-flight requests',
 			description: redactBearerFragments(err.bodyText ?? 'Retry with backoff.'),
+			httpCode: '429',
+		});
+	}
+
+	if (err instanceof PerUserQuotaExhaustedError) {
+		// Sibling-of-BackpressureError 429; distinct semantic (per-user
+		// cap, not global queue saturation). Surface the user_id + cap
+		// in the description so operators can see WHICH user hit the
+		// limit without having to dig through the raw response body.
+		const userId = err.userId ?? 'unknown';
+		const cap = err.cap ?? 'unknown';
+		const retryHint = err.retryAfterMs != null
+			? ` Server suggests retrying after ~${Math.round(err.retryAfterMs / 1000)}s.`
+			: '';
+		return new NodeApiError(node, jsonifyError(err), {
+			message: `Per-user quota exhausted for user ${userId} (cap=${cap})`,
+			description: redactBearerFragments(err.bodyText ?? `The per-user run cap has been hit.${retryHint}`),
 			httpCode: '429',
 		});
 	}

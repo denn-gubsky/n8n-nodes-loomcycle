@@ -164,6 +164,44 @@ describe('LoomCycle resource=memory', () => {
 		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
 	});
 
+	// REGRESSION: pre-fix, an empty / whitespace-only value silently
+	// coerced to `{}` via parseJsonField's strict-mode default,
+	// destructively overwriting the stored entry with an empty object.
+	// Now we throw early so the operator sees the misconfiguration.
+	it('REGRESSION — Set Entry throws on empty value rather than coercing to {}', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: '',
+				setOptions: {},
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Value is required/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
+	it('REGRESSION — Set Entry throws on whitespace-only value', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: '   \n  ',
+				setOptions: {},
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Value is required/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
 	it('Delete Entry calls deleteMemoryEntry + surfaces ok envelope', async () => {
 		mockClient.deleteMemoryEntry.mockResolvedValue(undefined);
 		const node = new LoomCycle();

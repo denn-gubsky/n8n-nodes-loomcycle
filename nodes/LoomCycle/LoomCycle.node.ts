@@ -271,6 +271,19 @@ async function executeMemory(
 		const scopeID = this.getNodeParameter('scopeID', i) as string;
 		const key = this.getNodeParameter('key', i) as string;
 		const rawValue = this.getNodeParameter('value', i, '{}') as unknown;
+		// Pre-validate empty/blank — setEntry is a destructive upsert,
+		// and parseJsonField's strict mode coerces an empty trimmed
+		// string to `{}` (its general default for empty input). For a
+		// memory write that's almost always operator error (likely an
+		// unset expression), surface as a clear NodeOperationError
+		// instead of silently overwriting the stored value with an
+		// empty object.
+		if (typeof rawValue === 'string' && rawValue.trim() === '') {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Value is required for Set Entry — enter a valid JSON value (object, array, primitive, or null). An empty value would silently overwrite the stored entry with `{}`.',
+			);
+		}
 		// Strict JSON: memory writes that aren't valid JSON values land
 		// server-side as raw strings — surprising on read-back, so we
 		// require valid JSON syntactically (anything from a primitive
@@ -337,8 +350,19 @@ async function executeChannel(
 		const opts: UpdateChannelOptions = {};
 		if (settings.description !== undefined) opts.description = settings.description as string;
 		if (settings.semantic) opts.semantic = settings.semantic as string;
-		if (typeof settings.defaultTtl === 'number') opts.default_ttl = settings.defaultTtl;
-		if (typeof settings.maxMessages === 'number') opts.max_messages = settings.maxMessages;
+		// IMPORTANT: guard with `> 0` to avoid forwarding the n8n
+		// collection's default value (0) as a "zero out TTL / cap"
+		// update. A partial-update collection means "fields the operator
+		// touched"; an untouched defaultTtl/maxMessages reads as 0 here,
+		// and forwarding that would silently destroy any TTL or cap
+		// previously configured on the channel. Match the createChannel
+		// guard.
+		if (typeof settings.defaultTtl === 'number' && settings.defaultTtl > 0) {
+			opts.default_ttl = settings.defaultTtl;
+		}
+		if (typeof settings.maxMessages === 'number' && settings.maxMessages > 0) {
+			opts.max_messages = settings.maxMessages;
+		}
 		const resp = await client.updateChannel(name, opts);
 		return resp as unknown as IDataObject;
 	}
