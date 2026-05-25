@@ -12,6 +12,7 @@ import {
 	NotFoundError,
 	NotPausedError,
 	PauseNotConfiguredError,
+	PerUserQuotaExhaustedError,
 	SessionBusyError,
 	SessionNotFoundError,
 	SnapshotNotFoundError,
@@ -210,5 +211,39 @@ describe('wrapLoomcycleError', () => {
 		);
 		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & { description?: string };
 		expect(wrapped.description ?? '').not.toContain('leaked-token-abcdefghij-9999');
+	});
+
+	// v1.2.0: write paths (memory + channel CRUD) are the first surfaces
+	// where per-user quota exhaustion is likely to fire in production.
+	// Verify the dedicated 429 branch produces a clear operator-facing
+	// message with userId + cap instead of falling through to the base
+	// LoomcycleError mapping.
+	it('maps PerUserQuotaExhaustedError to a 429 with userId + cap in the description', () => {
+		const err = new PerUserQuotaExhaustedError('per-user run cap reached', {
+			status: 429,
+			bodyText: 'user u-1 hit cap=10',
+			userId: 'u-1',
+			cap: 10,
+			retryAfterMs: 30000,
+		});
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & {
+			description?: string;
+			message?: string;
+			httpCode?: string;
+		};
+		expect(wrapped.httpCode).toBe('429');
+		expect(wrapped.message).toContain('u-1');
+		expect(wrapped.message).toContain('cap=10');
+	});
+
+	it('PerUserQuotaExhaustedError with null userId/cap surfaces "unknown" placeholders', () => {
+		const err = new PerUserQuotaExhaustedError('quota exhausted', { status: 429 });
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & {
+			description?: string;
+			message?: string;
+			httpCode?: string;
+		};
+		expect(wrapped.httpCode).toBe('429');
+		expect(wrapped.message).toContain('unknown');
 	});
 });

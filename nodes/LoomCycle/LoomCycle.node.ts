@@ -6,7 +6,15 @@ import type {
 	INodeTypeDescription,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import type { AgentStatus, ChannelScope, RunOptions, SubstrateToolInput } from '@loomcycle/client';
+import type {
+	AgentStatus,
+	ChannelScope,
+	CreateChannelOptions,
+	RunOptions,
+	SetMemoryEntryOptions,
+	SubstrateToolInput,
+	UpdateChannelOptions,
+} from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
@@ -258,6 +266,48 @@ async function executeMemory(
 		return resp as unknown as IDataObject;
 	}
 
+	if (operation === 'setEntry') {
+		const scope = this.getNodeParameter('scope', i) as string;
+		const scopeID = this.getNodeParameter('scopeID', i) as string;
+		const key = this.getNodeParameter('key', i) as string;
+		const rawValue = this.getNodeParameter('value', i, '{}') as unknown;
+		// Pre-validate empty/blank — setEntry is a destructive upsert,
+		// and parseJsonField's strict mode coerces an empty trimmed
+		// string to `{}` (its general default for empty input). For a
+		// memory write that's almost always operator error (likely an
+		// unset expression), surface as a clear NodeOperationError
+		// instead of silently overwriting the stored value with an
+		// empty object.
+		if (typeof rawValue === 'string' && rawValue.trim() === '') {
+			throw new NodeOperationError(
+				this.getNode(),
+				'Value is required for Set Entry — enter a valid JSON value (object, array, primitive, or null). An empty value would silently overwrite the stored entry with `{}`.',
+			);
+		}
+		// Strict JSON: memory writes that aren't valid JSON values land
+		// server-side as raw strings — surprising on read-back, so we
+		// require valid JSON syntactically (anything from a primitive
+		// to an object is fine; the substrate stores opaque JSON).
+		const value = parseJsonField(rawValue, { strict: true, node: this.getNode() });
+		const setOptions = this.getNodeParameter('setOptions', i, {}) as IDataObject;
+		const opts: SetMemoryEntryOptions = { value };
+		if (setOptions.embed === true) opts.embed = true;
+		if (typeof setOptions.ttlSeconds === 'number' && setOptions.ttlSeconds > 0) {
+			opts.ttl_seconds = setOptions.ttlSeconds;
+		}
+		const resp = await client.setMemoryEntry(scope, scopeID, key, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'deleteEntry') {
+		const scope = this.getNodeParameter('scope', i) as string;
+		const scopeID = this.getNodeParameter('scopeID', i) as string;
+		const key = this.getNodeParameter('key', i) as string;
+		await client.deleteMemoryEntry(scope, scopeID, key);
+		// Adapter returns void on 204; surface a consistent ok envelope for n8n
+		return { ok: true, scope, scope_id: scopeID, key } as IDataObject;
+	}
+
 	throw new NodeOperationError(this.getNode(), `Unknown memory operation: ${operation}`);
 }
 
@@ -270,6 +320,58 @@ async function executeChannel(
 	if (operation === 'listChannels') {
 		const resp = await client.listChannels();
 		return resp as unknown as IDataObject;
+	}
+
+	// Channel admin CRUD (v0.11.5) — these operate at the substrate
+	// scope (runtime channel registry), distinct from the per-message
+	// scope/userId triple used by publish/subscribe/peek/ack.
+	if (operation === 'createChannel') {
+		const name = this.getNodeParameter('channelName', i) as string;
+		const settings = this.getNodeParameter('channelSettings', i, {}) as IDataObject;
+		const opts: CreateChannelOptions = { name };
+		if (settings.description) opts.description = settings.description as string;
+		if (settings.scope) opts.scope = settings.scope as string;
+		if (settings.semantic) opts.semantic = settings.semantic as string;
+		if (typeof settings.defaultTtl === 'number' && settings.defaultTtl > 0) {
+			opts.default_ttl = settings.defaultTtl;
+		}
+		if (typeof settings.maxMessages === 'number' && settings.maxMessages > 0) {
+			opts.max_messages = settings.maxMessages;
+		}
+		if (settings.publisher) opts.publisher = settings.publisher as string;
+		if (settings.period) opts.period = settings.period as string;
+		const resp = await client.createChannel(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'updateChannel') {
+		const name = this.getNodeParameter('channelName', i) as string;
+		const settings = this.getNodeParameter('updateSettings', i, {}) as IDataObject;
+		const opts: UpdateChannelOptions = {};
+		if (settings.description !== undefined) opts.description = settings.description as string;
+		if (settings.semantic) opts.semantic = settings.semantic as string;
+		// IMPORTANT: guard with `> 0` to avoid forwarding the n8n
+		// collection's default value (0) as a "zero out TTL / cap"
+		// update. A partial-update collection means "fields the operator
+		// touched"; an untouched defaultTtl/maxMessages reads as 0 here,
+		// and forwarding that would silently destroy any TTL or cap
+		// previously configured on the channel. Match the createChannel
+		// guard.
+		if (typeof settings.defaultTtl === 'number' && settings.defaultTtl > 0) {
+			opts.default_ttl = settings.defaultTtl;
+		}
+		if (typeof settings.maxMessages === 'number' && settings.maxMessages > 0) {
+			opts.max_messages = settings.maxMessages;
+		}
+		const resp = await client.updateChannel(name, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'deleteChannel') {
+		const name = this.getNodeParameter('channelName', i) as string;
+		await client.deleteChannel(name);
+		// Adapter returns void on success; surface a consistent ok envelope
+		return { ok: true, name } as IDataObject;
 	}
 
 	const channel = this.getNodeParameter('channel', i) as string;

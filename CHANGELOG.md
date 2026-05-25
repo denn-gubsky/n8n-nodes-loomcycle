@@ -2,6 +2,39 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-05-25
+
+**Minor release.** Closes the long-standing memory-writes gap + adds runtime channel admin CRUD. Both surfaces consume `@loomcycle/client@^0.11.5`'s newly-typed `setMemoryEntry` / `deleteMemoryEntry` / `createChannel` / `updateChannel` / `deleteChannel` methods.
+
+### Added
+
+- **`Memory → Set Entry` action-node operation** (`client.setMemoryEntry`). Idempotent JSON-value upsert by `(scope, scope_id, key)`. Optional `embed=true` triggers a synchronous embedding via the operator-configured embedder (response reports whether the embedding actually landed). Optional `ttlSeconds` for time-bounded entries.
+- **`Memory → Delete Entry` action-node operation** (`client.deleteMemoryEntry`). Idempotent — deleting a missing row is a non-error.
+- **`Channel → Create Channel` action-node operation** (`client.createChannel`). Creates a runtime-substrate channel with operator-configurable scope / semantic / TTL / max-messages / publisher / period. Yaml-declared channels refuse with HTTP 409 (`channel_yaml_immutable`).
+- **`Channel → Update Channel` action-node operation** (`client.updateChannel`). Partial update: only the fields you set are touched. Yaml channels refuse.
+- **`Channel → Delete Channel` action-node operation** (`client.deleteChannel`). Cascades messages + cursors. Yaml channels refuse.
+- **`LoomCycle Memory Tool` cluster sub-node** now exposes `setEntry` + `deleteEntry` ops in its Zod schema. **This is the strategic addition**: AI Agents can now write to memory mid-reasoning, unlocking stateful agentic workflows (cache across reasoning turns, persist across runs). The default tool description grew from *"Read loomcycle Memory entries"* to *"Read or write loomcycle Memory entries"*.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.11.4` → `^0.11.5`. v0.11.5 added the 5 new methods consumed here. All existing methods unchanged.
+- **`Memory` resource ops** went from 4 (read-only) → 6 (full CRUD).
+- **`Channel` resource ops** went from 5 → 8.
+- **README + `doc/SUPPORT.md`** updated to reflect the new ops and version compatibility.
+
+### Notable design decisions
+
+- **Channel admin CRUD is NOT exposed on the cluster `LoomCycle Channel Tool` sub-node.** Channel lifecycle is operator concern, not AI Agent concern. The tool sub-node keeps its publish + peek ops as agent-callable surfaces; create / update / delete stay on the action node where operators wire them deliberately.
+- **The strict-JSON parse from publish payload also applies to memory `setEntry` value field.** A non-JSON string would otherwise land server-side opaquely; the strict parse throws early with the operator-facing `Invalid JSON: ...` error.
+- **n8n-nodes-base lint rule alignment.** The Update Channel param was renamed `Update Settings` → `Update Fields` per `node-param-display-name-wrong-for-update-fields`. Create Channel settings collection alphabetised per `node-param-collection-type-unsorted-items`.
+
+### Verified
+
+- `npm run lint` clean
+- `npm run typecheck` clean
+- `npm test` — 240 passing + 4 skipped (was 229 + 4; +11 new cases covering memory CRUD writes, channel admin CRUD, and the cluster Memory Tool's new write surface)
+- `npm run build` produces all 8 node paths
+
 ## [1.1.4] — 2026-05-24
 
 Patch release. **Defence-in-depth fix for `messages[*].tool_call_id` gateway rejection** — adds synthetic tool-call id generation at every wire boundary where the id could be empty.

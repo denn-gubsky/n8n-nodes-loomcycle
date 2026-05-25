@@ -11,11 +11,16 @@ const { mockClient } = vi.hoisted(() => ({
 		listMemoryScopeIDs: vi.fn(),
 		listMemoryEntries: vi.fn(),
 		getMemoryEntry: vi.fn(),
+		setMemoryEntry: vi.fn(),
+		deleteMemoryEntry: vi.fn(),
 		listChannels: vi.fn(),
 		publishChannel: vi.fn(),
 		subscribeChannel: vi.fn(),
 		peekChannel: vi.fn(),
 		ackChannel: vi.fn(),
+		createChannel: vi.fn(),
+		updateChannel: vi.fn(),
+		deleteChannel: vi.fn(),
 		health: vi.fn(),
 	},
 }));
@@ -90,5 +95,121 @@ describe('LoomCycle resource=memory', () => {
 		const result = await node.execute.call(ctx);
 		expect(mockClient.getMemoryEntry).toHaveBeenCalledWith('agent', 'a1', 'k1');
 		expect((result[0][0].json as Record<string, unknown>).key).toBe('k1');
+	});
+
+	// ---- v0.11.5 admin CRUD ----
+
+	it('Set Entry forwards scope + scopeID + key + parsed JSON value', async () => {
+		mockClient.setMemoryEntry.mockResolvedValue({
+			scope: 'briefings',
+			scope_id: 'arctic-terns',
+			key: 'raw',
+			embedded: false,
+		});
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 'briefings',
+				scopeID: 'arctic-terns',
+				key: 'raw',
+				value: '{"text":"Arctic terns migrate further than any other bird"}',
+				setOptions: {},
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.setMemoryEntry).toHaveBeenCalledWith(
+			'briefings',
+			'arctic-terns',
+			'raw',
+			expect.objectContaining({ value: { text: 'Arctic terns migrate further than any other bird' } }),
+		);
+	});
+
+	it('Set Entry honours embed=true + ttlSeconds in opts', async () => {
+		mockClient.setMemoryEntry.mockResolvedValue({ scope: 's', scope_id: 'i', key: 'k', embedded: true });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: '{"x":1}',
+				setOptions: { embed: true, ttlSeconds: 3600 },
+			},
+		});
+		await node.execute.call(ctx);
+		const opts = mockClient.setMemoryEntry.mock.calls[0][3];
+		expect(opts.embed).toBe(true);
+		expect(opts.ttl_seconds).toBe(3600);
+	});
+
+	it('Set Entry throws on invalid JSON value (strict parse)', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: 'this is not json',
+				setOptions: {},
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Invalid JSON/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
+	// REGRESSION: pre-fix, an empty / whitespace-only value silently
+	// coerced to `{}` via parseJsonField's strict-mode default,
+	// destructively overwriting the stored entry with an empty object.
+	// Now we throw early so the operator sees the misconfiguration.
+	it('REGRESSION — Set Entry throws on empty value rather than coercing to {}', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: '',
+				setOptions: {},
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Value is required/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
+	it('REGRESSION — Set Entry throws on whitespace-only value', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'memory',
+				operation: 'setEntry',
+				scope: 's',
+				scopeID: 'i',
+				key: 'k',
+				value: '   \n  ',
+				setOptions: {},
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Value is required/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
+	it('Delete Entry calls deleteMemoryEntry + surfaces ok envelope', async () => {
+		mockClient.deleteMemoryEntry.mockResolvedValue(undefined);
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: { resource: 'memory', operation: 'deleteEntry', scope: 's', scopeID: 'i', key: 'k' },
+		});
+		const result = await node.execute.call(ctx);
+		expect(mockClient.deleteMemoryEntry).toHaveBeenCalledWith('s', 'i', 'k');
+		expect(result[0][0].json).toMatchObject({ ok: true, scope: 's', scope_id: 'i', key: 'k' });
 	});
 });
