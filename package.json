@@ -1,6 +1,6 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "1.1.4",
+	"version": "1.2.0",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -62,7 +62,7 @@
 		]
 	},
 	"dependencies": {
-		"@loomcycle/client": "^0.11.0"
+		"@loomcycle/client": "^0.11.5"
 	},
 	"peerDependencies": {
 		"@langchain/core": ">=0.3.0",

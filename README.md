@@ -31,8 +31,8 @@ Eight nodes plus one credential type.
 
 - **LoomCycle** — single multi-resource node covering six op groups:
   - **Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
-  - **Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` (read-only; writes deferred until adapter exposes them)
-  - **Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels`
+  - **Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD as of 1.2.0; reads + writes via `@loomcycle/client@^0.11.5`)
+  - **Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` (message-flow + runtime admin CRUD as of 1.2.0; yaml-declared channels remain immutable)
   - **Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
   - **Skill Definition** — same 7 ops as AgentDef, applied to skills
   - **MCP Server Definition** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
@@ -45,7 +45,7 @@ Eight nodes plus one credential type.
 ### Cluster sub-nodes (plug into n8n's AI Agent)
 
 - **LoomCycle Chat Model** — plugs into the AI Agent's **Chat Model** slot. Routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`) instead of a direct provider SDK. Single credential covers all providers; loomcycle's resolver picks provider / model at request time; per-user quota tracking; single audit log. Supports tool calling (LangChain `bindTools` → gateway's provider-agnostic schema → substrate translates per-provider). **No agent loop** — this is the thin gateway shim, not the full runtime. Use **Sub-Agent Tool** below when you want the agent loop.
-- **LoomCycle Memory Tool** — exposes Memory read ops as a single discriminated tool the AI Agent can call.
+- **LoomCycle Memory Tool** — exposes Memory CRUD (read + write) as a single discriminated tool the AI Agent can call. The agent can persist intermediate state between reasoning turns or across runs via `setEntry` / `deleteEntry`.
 - **LoomCycle Channel Tool** — Channel publish + peek as agent tools.
 - **LoomCycle Sub-Agent Tool** — delegates to a configured loomcycle agent (drains `runStreaming`); the agent receives the parent's tool-call prompt and returns its `finalText`.
 - **LoomCycle MCP Server Tool** — **strategic differentiator.** Drag onto a canvas → the substrate auto-registers the MCP server via `MCPServerDef` (idempotent ensure: `get` → `create` on `NotFoundError`) → returns a tool that spawns a loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. `cleanupOnEnd: false` default — registrations persist across executions for stable agentic teams.
@@ -148,7 +148,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^0.11.0`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.11.0 added `llmChat()` + `llmStream()` typed wrappers around the LLM Gateway endpoint (`POST /v1/_llm/chat`, substrate v0.10.x+), powering the new `LoomCycle Chat Model` cluster sub-node.
+This package pins `@loomcycle/client` to `^0.11.5`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.11.0 added `llmChat()` + `llmStream()` typed wrappers around the LLM Gateway endpoint (`POST /v1/_llm/chat`); v0.11.5 added Memory writes (`setMemoryEntry` / `deleteMemoryEntry`) + runtime Channel admin CRUD (`createChannel` / `updateChannel` / `deleteChannel`), both consumed by this package's 1.2.0 release.
 
 ### Verified deployments
 

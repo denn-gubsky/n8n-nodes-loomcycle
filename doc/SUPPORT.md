@@ -4,6 +4,8 @@
 
 | `n8n-nodes-loomcycle` | Min loomcycle | Min n8n | Min Node | Notes |
 |---|---|---|---|---|
+| `1.2.0` | `v0.11.x` | `1.82.0` | `20.15` | Minor — Memory writes (`setEntry`/`deleteEntry`) + Channel admin CRUD (`createChannel`/`updateChannel`/`deleteChannel`); adapter `^0.11.5` |
+| `1.1.4` | `v0.10.x` | `1.82.0` | `20.15` | Patch — synthetic tool_call_id at every wire boundary (Chat Model + tools resilience) |
 | `1.1.0` | `v0.10.x` | `1.82.0` | `20.15` | Minor — `LoomCycle Chat Model` cluster sub-node (5th sub-node); adapter `^0.11.0` for LLM Gateway endpoint |
 | `1.0.5` | `v0.9.3` | `1.82.0` | `20.15` | Patch — `manualTriggerFunction` honours SSE Transport in editor test mode; CI actions bumped to v5 |
 | `1.0.4` | `v0.9.3` | `1.82.0` | `20.15` | Patch — cluster sub-nodes ship both `supplyData()` + `execute()` (fixes n8n Tools Agent mode) |
@@ -31,6 +33,8 @@
 | User-runs SSE stream (`GET /v1/users/{id}/agents/stream`) | `v0.9.x` (PR #173) |
 | Library v2 (`GET /v1/_library/{agents,skills,mcp-servers}`) | `v0.9.3` — exposed via adapter `^0.10.3` |
 | **LLM Gateway (`POST /v1/_llm/chat`)** | `v0.10.x` — exposed via adapter `^0.11.0`; powers `LoomCycle Chat Model` sub-node |
+| **Memory writes (`setMemoryEntry` / `deleteMemoryEntry`)** | `v0.11.x` — exposed via adapter `^0.11.5`; powers `Memory → Set/Delete Entry` action node ops + `LoomCycle Memory Tool` cluster sub-node write surface |
+| **Channel admin CRUD (`createChannel` / `updateChannel` / `deleteChannel`)** | `v0.11.x` — exposed via adapter `^0.11.5`; powers `Channel → Create/Update/Delete Channel` action node ops. Yaml-declared channels refuse mutation with HTTP 409. |
 
 If you're on an older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 

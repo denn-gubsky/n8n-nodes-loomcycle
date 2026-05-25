@@ -6,6 +6,8 @@ const { mockClient } = vi.hoisted(() => ({
 		listMemoryScopeIDs: vi.fn(),
 		listMemoryEntries: vi.fn(),
 		getMemoryEntry: vi.fn(),
+		setMemoryEntry: vi.fn(),
+		deleteMemoryEntry: vi.fn(),
 	},
 }));
 
@@ -118,5 +120,57 @@ describe('LoomCycleMemoryTool', () => {
 		const out = await tool.invoke({ op: 'listScopes' });
 		expect(out).not.toContain('sk-leaked-token-abcdefghij');
 		expect(out).toContain('[REDACTED]');
+	});
+
+	// ---- v0.11.5 write ops via the agent-side tool ----
+
+	it('tool.invoke(op=setEntry) forwards scope + scopeID + key + value + embed/ttlSeconds', async () => {
+		mockClient.setMemoryEntry.mockResolvedValue({ scope: 's', scope_id: 'i', key: 'k', embedded: true });
+		const node = new LoomCycleMemoryTool();
+		const ctx = makeSupplyDataContext({ params: { toolName: 'mem', toolDescription: 'd' } });
+		const result = await invokeSupplyData(node, ctx);
+		const tool = result.response as { invoke: (args: unknown) => Promise<string> };
+		await tool.invoke({
+			op: 'setEntry',
+			scope: 'briefings',
+			scopeID: 'arctic-terns',
+			key: 'raw',
+			value: { text: 'Arctic terns migrate further than any other bird.' },
+			embed: true,
+			ttlSeconds: 3600,
+		});
+		expect(mockClient.setMemoryEntry).toHaveBeenCalledWith(
+			'briefings',
+			'arctic-terns',
+			'raw',
+			expect.objectContaining({
+				value: { text: 'Arctic terns migrate further than any other bird.' },
+				embed: true,
+				ttl_seconds: 3600,
+			}),
+		);
+	});
+
+	it('tool.invoke(op=setEntry) requires value (gateway-style validation)', async () => {
+		const node = new LoomCycleMemoryTool();
+		const ctx = makeSupplyDataContext({ params: { toolName: 'mem', toolDescription: 'd' } });
+		const result = await invokeSupplyData(node, ctx);
+		const tool = result.response as { invoke: (args: unknown) => Promise<string> };
+		const out = await tool.invoke({ op: 'setEntry', scope: 's', scopeID: 'i', key: 'k' });
+		// Missing value → tool throws → buildTool catches and returns
+		// { error } envelope as a JSON string.
+		expect(JSON.parse(out).error).toMatch(/value is required/);
+		expect(mockClient.setMemoryEntry).not.toHaveBeenCalled();
+	});
+
+	it('tool.invoke(op=deleteEntry) forwards scope + scopeID + key', async () => {
+		mockClient.deleteMemoryEntry.mockResolvedValue(undefined);
+		const node = new LoomCycleMemoryTool();
+		const ctx = makeSupplyDataContext({ params: { toolName: 'mem', toolDescription: 'd' } });
+		const result = await invokeSupplyData(node, ctx);
+		const tool = result.response as { invoke: (args: unknown) => Promise<string> };
+		const out = await tool.invoke({ op: 'deleteEntry', scope: 's', scopeID: 'i', key: 'k' });
+		expect(mockClient.deleteMemoryEntry).toHaveBeenCalledWith('s', 'i', 'k');
+		expect(JSON.parse(out)).toMatchObject({ ok: true, scope: 's', scope_id: 'i', key: 'k' });
 	});
 });
