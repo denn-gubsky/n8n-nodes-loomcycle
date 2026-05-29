@@ -87,20 +87,33 @@ export const mcpServerDefOps: INodeProperties[] = [
 		default: 'create',
 	},
 
-	// ---- Name (used by every op except Promote) ----
+	// ---- Name (Register — free text, since the registration is new) ----
 	{
 		displayName: 'Name',
 		name: 'name',
 		type: 'string',
 		default: '',
 		required: true,
+		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create'] } },
+		description: 'MCP server registration name — referenced by agents as `mcp__&lt;name&gt;__&lt;tool&gt;` in allowed_tools',
+	},
+
+	// ---- Name (manage ops — dropdown of existing yaml + dynamic MCP servers) ----
+	{
+		displayName: 'Name or ID',
+		name: 'name',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'loadMcpLibrary' },
+		default: '',
+		required: true,
 		displayOptions: {
 			show: {
 				resource: ['mcpServerDef'],
-				operation: ['create', 'get', 'list', 'retire', 'rediscover', 'verify'],
+				operation: ['get', 'list', 'retire', 'rediscover', 'verify'],
 			},
 		},
-		description: 'MCP server registration name — referenced by agents as `mcp__&lt;name&gt;__&lt;tool&gt;` in allowed_tools',
+		description:
+			'MCP server to act on — merged from loomcycle.yaml + the MCPServerDef registry. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
 
 	// ---- Def ID (Promote / Retire-by-id) ----

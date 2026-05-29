@@ -88,6 +88,39 @@ export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodeProp
 }
 
 /**
+ * List MCP server registrations from the loomcycle library — yaml-static
+ * mcp_servers + dynamically-registered MCPServerDefs, merged into one
+ * source-tagged list. Wraps `client.listLibraryMcpServers()` (loomcycle
+ * v0.9.x), the MCP counterpart of `loadAgents`.
+ *
+ * Surfaces the curated / already-registered MCP servers as a dropdown so
+ * an operator forking or rediscovering one doesn't have to type the name
+ * by hand. Bearer-only (operator-trust); no userId required.
+ */
+export async function loadMcpLibrary(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.listLibraryMcpServers();
+		const entries = [...resp.entries].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
+			return [
+				{
+					name: '— no MCP servers in loomcycle.yaml or the MCPServerDef registry; type the name manually —',
+					value: '',
+				},
+			];
+		}
+		return entries.map((entry) => ({
+			name: entry.name,
+			value: entry.name,
+			description: libraryEntryDescription(entry),
+		}));
+	} catch (err) {
+		return [failedToLoadOption('MCP servers', err)];
+	}
+}
+
+/**
  * List declared channels via GET /v1/_channels (admin endpoint;
  * shipped in loomcycle v0.9.x PR #173).
  */

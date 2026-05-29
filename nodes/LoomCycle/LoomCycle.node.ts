@@ -10,6 +10,9 @@ import type {
 	AgentStatus,
 	ChannelScope,
 	CreateChannelOptions,
+	HookFailMode,
+	HookPhase,
+	RegisterHookOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
 	SubstrateToolInput,
@@ -20,7 +23,7 @@ import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
 import { buildSegments } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
-import { loadAgents, loadChannels, loadMemoryScopes } from './helpers/loadOptions';
+import { loadAgents, loadChannels, loadMcpLibrary, loadMemoryScopes } from './helpers/loadOptions';
 import {
 	runOps,
 	memoryOps,
@@ -28,12 +31,14 @@ import {
 	agentDefOps,
 	skillDefOps,
 	mcpServerDefOps,
+	scheduleDefOps,
+	hookOps,
 } from './descriptions';
 
 /**
  * Umbrella action node for the loomcycle agentic runtime. Op-discriminated
- * across six resources: `run`, `memory`, `channel`, `agentDef`,
- * `skillDef`, `mcpServerDef`.
+ * across eight resources: `run`, `memory`, `channel`, `agentDef`,
+ * `skillDef`, `mcpServerDef`, `scheduleDef`, `hook`.
  *
  * Programmatic execute() (not declarative routing) because the load-bearing
  * paths go through `@loomcycle/client` rather than raw HTTP — typed-error
@@ -47,7 +52,7 @@ export class LoomCycle implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
-		description: 'Drive a loomcycle agentic runtime — Run / Memory / Channel / AgentDef / SkillDef / MCPServerDef ops over HTTP+SSE',
+		description: 'Drive a loomcycle agentic runtime — Run / Memory / Channel / AgentDef / SkillDef / MCPServerDef / Schedule / Hook ops over HTTP+SSE',
 		defaults: { name: 'LoomCycle' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -63,9 +68,11 @@ export class LoomCycle implements INodeType {
 				options: [
 					{ name: 'Agent Definition', value: 'agentDef' },
 					{ name: 'Channel', value: 'channel' },
+					{ name: 'Hook', value: 'hook' },
 					{ name: 'MCP Server Definition', value: 'mcpServerDef' },
 					{ name: 'Memory', value: 'memory' },
 					{ name: 'Run', value: 'run' },
+					{ name: 'Schedule Definition', value: 'scheduleDef' },
 					{ name: 'Skill Definition', value: 'skillDef' },
 				],
 				default: 'run',
@@ -76,6 +83,8 @@ export class LoomCycle implements INodeType {
 			...agentDefOps,
 			...skillDefOps,
 			...mcpServerDefOps,
+			...scheduleDefOps,
+			...hookOps,
 		],
 	};
 
@@ -83,6 +92,7 @@ export class LoomCycle implements INodeType {
 		loadOptions: {
 			loadAgents,
 			loadChannels,
+			loadMcpLibrary,
 			loadMemoryScopes,
 		},
 	};
@@ -111,6 +121,10 @@ export class LoomCycle implements INodeType {
 					row = await executeSkillDef.call(this, client, operation, i);
 				} else if (resource === 'mcpServerDef') {
 					row = await executeMcpServerDef.call(this, client, operation, i);
+				} else if (resource === 'scheduleDef') {
+					row = await executeScheduleDef.call(this, client, operation, i);
+				} else if (resource === 'hook') {
+					row = await executeHook.call(this, client, operation, i);
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`);
 				}
@@ -164,6 +178,11 @@ async function executeRun(
 		if (additionalFields.sessionId) runOpts.sessionId = additionalFields.sessionId as string;
 		if (additionalFields.agentId) runOpts.agentId = additionalFields.agentId as string;
 		if (additionalFields.userBearer) runOpts.userBearer = additionalFields.userBearer as string;
+
+		// RFC F (v0.12.x): per-tool named credentials map. Template-string
+		// values only — never persisted, never logged by the runtime.
+		const userCredentials = collectNameValuePairs(additionalFields.userCredentials, 'credential');
+		if (Object.keys(userCredentials).length > 0) runOpts.userCredentials = userCredentials;
 
 		const allowedTools = parseCsv(additionalFields.allowedTools as string);
 		if (allowedTools !== undefined) runOpts.allowedTools = allowedTools;
@@ -478,7 +497,7 @@ async function executeMcpServerDef(
 			);
 		}
 		const url = this.getNodeParameter('url', i) as string;
-		const headers = collectHeaders(this.getNodeParameter('headers', i, {}));
+		const headers = collectNameValuePairs(this.getNodeParameter('headers', i, {}), 'header');
 		input.transport = transport;
 		input.url = url;
 		if (Object.keys(headers).length > 0) input.headers = headers;
@@ -486,6 +505,134 @@ async function executeMcpServerDef(
 
 	const resp = await client.mcpServerDef(input);
 	return { result: resp } as IDataObject;
+}
+
+/**
+ * Substrate-native scheduled-run admin (RFC E, v0.12.x). Mirrors the
+ * AgentDef/SkillDef op-discriminated shape, but the schedule body
+ * (agent / prompt / cron / user_id / user_tier / credentials) is assembled
+ * into the `overlay` object rather than the generic verify/promote knobs.
+ * 5 ops only — no `promote` op, no `verify` op (RFC E v1.x schema).
+ */
+async function executeScheduleDef(
+	this: IExecuteFunctions,
+	client: Awaited<ReturnType<typeof getClient>>,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
+
+	const name = this.getNodeParameter('name', i, '') as string;
+	if (name) input.name = name;
+	const defId = this.getNodeParameter('defId', i, '') as string;
+	if (defId) input.def_id = defId;
+	const parentDefId = this.getNodeParameter('parentDefId', i, '') as string;
+	if (parentDefId) input.parent_def_id = parentDefId;
+	const description = this.getNodeParameter('defDescription', i, '') as string;
+	if (description) input.description = description;
+
+	if (operation === 'create' || operation === 'fork') {
+		input.promote = this.getNodeParameter('promote', i, true) as boolean;
+
+		// Build the overlay (the schedule's content-bearing fields). For
+		// Fork, start from the operator's JSON diff and layer credentials
+		// on top; for Create, assemble from the structured fields. Strict
+		// parse on Fork so a malformed overlay surfaces as a clear error
+		// rather than a string masquerading as an object.
+		const overlay: Record<string, unknown> = {};
+		if (operation === 'fork') {
+			const parsed = parseJsonField(this.getNodeParameter('overlay', i, '{}'), {
+				strict: true,
+				node: this.getNode(),
+			});
+			if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+				Object.assign(overlay, parsed as Record<string, unknown>);
+			}
+		}
+
+		if (operation === 'create') {
+			const schedule = this.getNodeParameter('schedule', i) as string;
+			const agent = this.getNodeParameter('agent', i) as string;
+			const prompt = this.getNodeParameter('prompt', i) as string;
+			const extra = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+			const treatPromptAsUntrusted = extra.treatPromptAsUntrusted === true;
+
+			overlay.schedule = schedule;
+			overlay.agent = agent;
+			overlay.prompt = buildSegments(prompt, treatPromptAsUntrusted);
+			if (extra.userId) overlay.user_id = extra.userId as string;
+			if (extra.userTier) overlay.user_tier = extra.userTier as string;
+			if (extra.timezone) overlay.timezone = extra.timezone as string;
+			if (typeof extra.enabled === 'boolean') overlay.enabled = extra.enabled;
+			if (typeof extra.catchUpMax === 'number' && extra.catchUpMax > 0) {
+				overlay.catch_up_max = extra.catchUpMax;
+			}
+			const requiredCredentials = parseCsv(extra.requiredCredentials as string);
+			if (requiredCredentials !== undefined) overlay.required_credentials = requiredCredentials;
+		}
+
+		// Per-fire named credentials (template strings only) — shared by
+		// Create and Fork. A template fork declaring required_credentials
+		// loud-fails server-side if these keys are missing.
+		const userCredentials = collectNameValuePairs(
+			this.getNodeParameter('userCredentials', i, {}),
+			'credential',
+		);
+		if (Object.keys(userCredentials).length > 0) overlay.user_credentials = userCredentials;
+
+		if (Object.keys(overlay).length > 0) input.overlay = overlay;
+	}
+
+	const resp = await client.scheduleDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * Pre/post-tool webhook registration. `registerHook` makes loomcycle POST
+ * hook payloads to a consumer-run callback URL (typically an n8n Webhook
+ * trigger node). `owner` defaults to the node id so re-runs are idempotent
+ * on (owner, name) without the operator inventing an owner string.
+ */
+async function executeHook(
+	this: IExecuteFunctions,
+	client: Awaited<ReturnType<typeof getClient>>,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'register') {
+		const ownerParam = this.getNodeParameter('owner', i, '') as string;
+		const opts: RegisterHookOptions = {
+			owner: ownerParam || `n8n:${this.getNode().id}`,
+			name: this.getNodeParameter('name', i) as string,
+			phase: this.getNodeParameter('phase', i) as HookPhase,
+			callbackUrl: this.getNodeParameter('callbackUrl', i) as string,
+		};
+		const agents = parseCsv(this.getNodeParameter('agents', i, '') as string);
+		if (agents !== undefined) opts.agents = agents;
+		const tools = parseCsv(this.getNodeParameter('tools', i, '') as string);
+		if (tools !== undefined) opts.tools = tools;
+		const failMode = this.getNodeParameter('failMode', i, 'open') as HookFailMode;
+		if (failMode) opts.failMode = failMode;
+		const timeoutMs = this.getNodeParameter('timeoutMs', i, 0) as number;
+		if (typeof timeoutMs === 'number' && timeoutMs > 0) opts.timeoutMs = timeoutMs;
+
+		const resp = await client.registerHook(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'list') {
+		const hooks = await client.listHooks();
+		return { hooks } as unknown as IDataObject;
+	}
+
+	if (operation === 'delete') {
+		const id = this.getNodeParameter('hookId', i) as string;
+		await client.deleteHook(id);
+		// Adapter returns void on success; surface a consistent ok envelope
+		return { ok: true, id } as IDataObject;
+	}
+
+	throw new NodeOperationError(this.getNode(), `Unknown hook operation: ${operation}`);
 }
 
 /**
@@ -527,16 +674,17 @@ function buildSubstrateInput(this: IExecuteFunctions, operation: string, i: numb
 }
 
 /**
- * Collect headers from the n8n fixedCollection shape into a map. The
- * input shape is `{ header: [{ name, value }, ...] }`. Empty when the
- * operator added no headers.
+ * Collect an n8n fixedCollection of `{ name, value }` rows into a map.
+ * The input shape is `{ <key>: [{ name, value }, ...] }` — `key` is the
+ * collection's option name (`header` for MCP headers, `credential` for
+ * named-credential maps). Empty when the operator added no rows.
  */
-function collectHeaders(raw: unknown): Record<string, string> {
+function collectNameValuePairs(raw: unknown, key: string): Record<string, string> {
 	const out: Record<string, string> = {};
 	if (!raw || typeof raw !== 'object') return out;
-	const headerCollection = (raw as { header?: unknown }).header;
-	if (!Array.isArray(headerCollection)) return out;
-	for (const entry of headerCollection) {
+	const collection = (raw as Record<string, unknown>)[key];
+	if (!Array.isArray(collection)) return out;
+	for (const entry of collection) {
 		if (!entry || typeof entry !== 'object') continue;
 		const name = (entry as { name?: unknown }).name;
 		const value = (entry as { value?: unknown }).value;
