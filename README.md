@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/social-preview.png" alt="n8n-nodes-loomcycle — loomcycle agentic runtime nodes for n8n" width="720">
+</p>
+
 # n8n-nodes-loomcycle
 
 Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime — design and operate loomcycle agents directly from n8n's visual builder.
