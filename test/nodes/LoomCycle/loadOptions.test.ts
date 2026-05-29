@@ -31,7 +31,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { loadAgents, loadChannels, loadMemoryScopes } from '../../../nodes/LoomCycle/helpers/loadOptions';
+import { loadAgents, loadChannels, loadMcpLibrary, loadMemoryScopes } from '../../../nodes/LoomCycle/helpers/loadOptions';
 import { makeLoadOptionsContext } from './_helpers';
 
 describe('loadOptions — SECURITY: error messages are bearer-redacted before reaching the UI', () => {
@@ -132,6 +132,38 @@ describe('loadOptions — SECURITY: error messages are bearer-redacted before re
 		const out = await loadAgents.call(ctx);
 		expect(out).toHaveLength(1);
 		expect(out[0].value).toBe('solo');
+	});
+
+	it('loadMcpLibrary redacts Bearer fragments from the error message', async () => {
+		mockClient.listLibraryMcpServers.mockRejectedValue(
+			new Error('Authorization: Bearer sk-mcp-leaked-7777 401'),
+		);
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadMcpLibrary.call(ctx);
+		const surface = JSON.stringify(out);
+		expect(surface).not.toContain('sk-mcp-leaked-7777');
+		expect(surface).toContain('[REDACTED]');
+	});
+
+	it('loadMcpLibrary returns alphabetically-sorted entries with source-tag descriptions', async () => {
+		mockClient.listLibraryMcpServers.mockResolvedValue({
+			entries: [
+				{ name: 'slack', source: 'dynamic-only', version_count: 1, latest_version: 1 },
+				{ name: 'github', source: 'both', version_count: 2, latest_version: 2 },
+			],
+		});
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadMcpLibrary.call(ctx);
+		expect(out.map((o) => o.name)).toEqual(['github', 'slack']);
+		expect(out.map((o) => o.value)).toEqual(['github', 'slack']);
+	});
+
+	it('loadMcpLibrary returns an informative placeholder when empty', async () => {
+		mockClient.listLibraryMcpServers.mockResolvedValue({ entries: [] });
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadMcpLibrary.call(ctx);
+		expect(out).toHaveLength(1);
+		expect(out[0].name).toContain('MCPServerDef');
 	});
 
 	it('loadChannels happy path returns sorted channel names', async () => {
