@@ -1,6 +1,6 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -31,7 +31,7 @@
 		"node": ">=20.15"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && gulp build:icons",
+		"build": "node scripts/build.cjs && gulp build:icons",
 		"build:icons": "gulp build:icons",
 		"dev": "tsc --watch",
 		"typecheck": "tsc --noEmit",
@@ -68,9 +68,7 @@
 			"dist/nodes/LoomCycleMcpServerTool/LoomCycleMcpServerTool.node.js"
 		]
 	},
-	"dependencies": {
-		"@loomcycle/client": "^0.12.8"
-	},
+	"dependencies": {},
 	"peerDependencies": {
 		"@langchain/core": ">=0.3.0",
 		"n8n-workflow": ">=1.82.0 <2.0.0",
@@ -78,10 +76,12 @@
 	},
 	"devDependencies": {
 		"@langchain/core": "^0.3.0",
+		"@loomcycle/client": "^0.12.8",
 		"@types/node": "^20.14.0",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",
 		"@typescript-eslint/parser": "^7.18.0",
 		"@vitest/coverage-v8": "^3.0.0",
+		"esbuild": "^0.28.0",
 		"eslint": "^8.57.0",
 		"eslint-plugin-n8n-nodes-base": "^1.16.0",
 		"gulp": "^5.0.0",
