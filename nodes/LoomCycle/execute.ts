@@ -61,6 +61,12 @@ export async function executeLoomCycle(
 				row = await executeMcpServerDef(ctx, client, operation, i);
 			} else if (resource === 'scheduleDef') {
 				row = await executeScheduleDef(ctx, client, operation, i);
+			} else if (resource === 'webhookDef') {
+				row = await executeWebhookDef(ctx, client, operation, i);
+			} else if (resource === 'a2aAgentDef') {
+				row = await executeA2aAgentDef(ctx, client, operation, i);
+			} else if (resource === 'a2aServerCardDef') {
+				row = await executeA2aServerCardDef(ctx, client, operation, i);
 			} else if (resource === 'hook') {
 				row = await executeHook(ctx, client, operation, i);
 			} else {
@@ -523,6 +529,101 @@ async function executeScheduleDef(
 	}
 
 	const resp = await client.scheduleDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * Inbound webhook admin (RFC H, v0.14.x). Manages WebhookDef rows — a
+ * loomcycle-hosted HTTP endpoint that, when POSTed to by an external system,
+ * spawns an agent run or publishes to a channel. INBOUND direction, distinct
+ * from the outbound pre/post-tool callbacks managed by the Hook resource.
+ *
+ * Create assembles the overlay from the structured essentials (agent /
+ * channel / enabled) layered on top of an optional advanced-overlay JSON
+ * (auth, rate_limit, payload_mapping, sync_response). 5 ops, no verify.
+ *
+ * Auth secrets are env-var REFERENCES (signing_secret_env / bearer_token_env)
+ * resolved from loomcycle's own env — plaintext credentials never cross this
+ * wire path (CLAUDE.md §security).
+ */
+async function executeWebhookDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
+
+	const name = ctx.getNodeParameter('name', i, '') as string;
+	if (name) input.name = name;
+	const defId = ctx.getNodeParameter('defId', i, '') as string;
+	if (defId) input.def_id = defId;
+	const parentDefId = ctx.getNodeParameter('parentDefId', i, '') as string;
+	if (parentDefId) input.parent_def_id = parentDefId;
+	const description = ctx.getNodeParameter('defDescription', i, '') as string;
+	if (description) input.description = description;
+
+	if (operation === 'create' || operation === 'fork') {
+		input.promote = ctx.getNodeParameter('promote', i, true) as boolean;
+
+		// Base from the advanced/overlay JSON (the full def diff for fork;
+		// auth/rate_limit/payload_mapping/sync_response for create), then
+		// layer the structured create fields on top so they win.
+		const overlay: Record<string, unknown> = {};
+		const parsed = parseJsonField(ctx.getNodeParameter('overlay', i, '{}'), {
+			strict: true,
+			node: ctx.getNode(),
+		});
+		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+			Object.assign(overlay, parsed as Record<string, unknown>);
+		}
+
+		if (operation === 'create') {
+			const agent = ctx.getNodeParameter('agent', i, '') as string;
+			const channel = ctx.getNodeParameter('channel', i, '') as string;
+			const enabled = ctx.getNodeParameter('enabled', i, true) as boolean;
+			if (agent) overlay.agent = agent;
+			if (channel) overlay.channel = channel;
+			overlay.enabled = enabled;
+		}
+
+		if (Object.keys(overlay).length > 0) input.overlay = overlay;
+	}
+
+	const resp = await client.webhookDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * A2A agent admin (RFC G, v0.14.x) — CLIENT side: defines an EXTERNAL A2A
+ * agent (agent_card_url / endpoint / auth / expected_skills) that loomcycle
+ * agents can call as a tool. Generic op-discriminated def-admin (the def body
+ * rides in the overlay JSON), so it reuses buildSubstrateInput like AgentDef.
+ */
+async function executeA2aAgentDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.a2aAgentDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * A2A server-card admin (RFC G, v0.14.x) — SERVER side: the agent card
+ * loomcycle publishes (provider / capabilities) to expose its own agents to
+ * external A2A clients. Generic def-admin; body in the overlay JSON.
+ */
+async function executeA2aServerCardDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.a2aServerCardDef(input);
 	return { result: resp } as IDataObject;
 }
 

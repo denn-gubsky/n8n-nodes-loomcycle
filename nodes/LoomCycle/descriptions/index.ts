@@ -6,3 +6,6 @@ export { skillDefOps } from './skilldef';
 export { mcpServerDefOps } from './mcpserverdef';
 export { scheduleDefOps } from './scheduledef';
 export { hookOps } from './hooks';
+export { webhookDefOps } from './webhookdef';
+export { a2aAgentDefOps } from './a2aagentdef';
+export { a2aServerCardDefOps } from './a2aservercarddef';
