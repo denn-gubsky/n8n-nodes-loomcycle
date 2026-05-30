@@ -22,7 +22,7 @@
 		{
 			"id": "node-loomcycle-run",
 			"name": "LoomCycle: Respond",
-			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleRun",
 			"typeVersion": 1,
 			"position": [500, 300],
 			"parameters": {
