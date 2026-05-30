@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
-  <title>LoomCycle Memory Tool</title>
+  <title>LoomCycle Chat Model</title>
   <circle cx="30" cy="30" r="28" fill="#0f172a"/>
-  <g fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="14" y="18" width="32" height="24" rx="3"/>
-    <path d="M14 26 L46 26"/>
-    <path d="M14 34 L46 34"/>
-    <path d="M22 18 L22 42"/>
-  </g>
+  <rect x="14" y="18" width="32" height="24" rx="3" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M30 23 L40 30 L30 37 Z" fill="#22d3ee" stroke="#22d3ee" stroke-width="2.5" stroke-linejoin="round"/>
 </svg>

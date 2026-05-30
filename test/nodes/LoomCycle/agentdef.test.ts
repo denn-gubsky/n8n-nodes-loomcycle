@@ -28,7 +28,8 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { LoomCycle } from '../../../nodes/LoomCycle/LoomCycle.node';
+import { LoomCycleAgentDef as LoomCycle } from '../../../nodes/LoomCycleAgentDef/LoomCycleAgentDef.node';
+import { LoomCycleSkillDef } from '../../../nodes/LoomCycleSkillDef/LoomCycleSkillDef.node';
 import { makeExecuteContext } from './_helpers';
 
 beforeEach(() => {
@@ -178,7 +179,7 @@ describe('LoomCycle resource=agentDef', () => {
 describe('LoomCycle resource=skillDef', () => {
 	it('routes to client.skillDef instead of client.agentDef', async () => {
 		mockClient.skillDef.mockResolvedValue({ name: 'webfetch-skill', version: 1 });
-		const node = new LoomCycle();
+		const node = new LoomCycleSkillDef();
 		const ctx = makeExecuteContext({
 			params: { resource: 'skillDef', operation: 'get', name: 'webfetch-skill' },
 		});
@@ -189,7 +190,7 @@ describe('LoomCycle resource=skillDef', () => {
 
 	it('Create with overlay forwards same shape as agentDef', async () => {
 		mockClient.skillDef.mockResolvedValue({ def_id: 'def_skill' });
-		const node = new LoomCycle();
+		const node = new LoomCycleSkillDef();
 		const ctx = makeExecuteContext({
 			params: {
 				resource: 'skillDef',

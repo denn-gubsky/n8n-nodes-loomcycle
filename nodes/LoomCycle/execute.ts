@@ -1,10 +1,4 @@
-import type {
-	IDataObject,
-	IExecuteFunctions,
-	INodeExecutionData,
-	INodeType,
-	INodeTypeDescription,
-} from 'n8n-workflow';
+import type { IDataObject, IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import type {
 	AgentStatus,
@@ -23,151 +17,96 @@ import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
 import { buildSegments } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
-import { loadAgents, loadChannels, loadMcpLibrary, loadMemoryScopes } from './helpers/loadOptions';
-import {
-	runOps,
-	memoryOps,
-	channelOps,
-	agentDefOps,
-	skillDefOps,
-	mcpServerDefOps,
-	scheduleDefOps,
-	hookOps,
-} from './descriptions';
 
 /**
- * Umbrella action node for the loomcycle agentic runtime. Op-discriminated
- * across eight resources: `run`, `memory`, `channel`, `agentDef`,
- * `skillDef`, `mcpServerDef`, `scheduleDef`, `hook`.
+ * Shared execute engine for the loomcycle action nodes. Each standalone
+ * node (LoomCycleRun, LoomCycleMemory, …) is a thin INodeType whose
+ * `execute()` delegates here with its fixed `resource`. The per-resource
+ * dispatch + typed-error mapping + SSE drain + credential-default
+ * fall-through all live in JS (not declarative routing) because the
+ * load-bearing paths go through `@loomcycle/client`.
  *
- * Programmatic execute() (not declarative routing) because the load-bearing
- * paths go through `@loomcycle/client` rather than raw HTTP — typed-error
- * mapping + SSE drain + credential-default fall-through all live in JS.
+ * The eight node classes used to be one umbrella node discriminated by a
+ * `resource` parameter; they were split into separate node types (v2.0.0)
+ * so each entity carries its own canvas icon — n8n renders one icon per
+ * node type. This engine preserves the original dispatch verbatim; only
+ * the entry point changed from `getNodeParameter('resource')` to the
+ * caller-supplied `resource` argument.
  */
-export class LoomCycle implements INodeType {
-	description: INodeTypeDescription = {
-		displayName: 'LoomCycle',
-		name: 'loomCycle',
-		icon: 'file:LoomCycle.svg',
-		group: ['transform'],
-		version: 1,
-		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
-		description: 'Drive a loomcycle agentic runtime — Run / Memory / Channel / AgentDef / SkillDef / MCPServerDef / Schedule / Hook ops over HTTP+SSE',
-		defaults: { name: 'LoomCycle' },
-		inputs: ['main'],
-		outputs: ['main'],
-		credentials: [{ name: 'loomCycleApi', required: true }],
-		properties: [
-			{
-				displayName: 'Resource',
-				name: 'resource',
-				type: 'options',
-				noDataExpression: true,
-				// Alphabetised per n8n-nodes-base convention; default 'run' is
-				// selected by `value`, not array position.
-				options: [
-					{ name: 'Agent Definition', value: 'agentDef' },
-					{ name: 'Channel', value: 'channel' },
-					{ name: 'Hook', value: 'hook' },
-					{ name: 'MCP Server Definition', value: 'mcpServerDef' },
-					{ name: 'Memory', value: 'memory' },
-					{ name: 'Run', value: 'run' },
-					{ name: 'Schedule Definition', value: 'scheduleDef' },
-					{ name: 'Skill Definition', value: 'skillDef' },
-				],
-				default: 'run',
-			},
-			...runOps,
-			...memoryOps,
-			...channelOps,
-			...agentDefOps,
-			...skillDefOps,
-			...mcpServerDefOps,
-			...scheduleDefOps,
-			...hookOps,
-		],
-	};
+export async function executeLoomCycle(
+	ctx: IExecuteFunctions,
+	resource: string,
+): Promise<INodeExecutionData[][]> {
+	const items = ctx.getInputData();
+	const returnData: INodeExecutionData[] = [];
+	const client = await getClient(ctx);
 
-	methods = {
-		loadOptions: {
-			loadAgents,
-			loadChannels,
-			loadMcpLibrary,
-			loadMemoryScopes,
-		},
-	};
+	for (let i = 0; i < items.length; i++) {
+		const operation = ctx.getNodeParameter('operation', i) as string;
 
-	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const items = this.getInputData();
-		const returnData: INodeExecutionData[] = [];
-		const client = await getClient(this);
+		try {
+			let row: IDataObject | undefined;
 
-		for (let i = 0; i < items.length; i++) {
-			const resource = this.getNodeParameter('resource', i) as string;
-			const operation = this.getNodeParameter('operation', i) as string;
-
-			try {
-				let row: IDataObject | undefined;
-
-				if (resource === 'run') {
-					row = await executeRun.call(this, client, operation, i);
-				} else if (resource === 'memory') {
-					row = await executeMemory.call(this, client, operation, i);
-				} else if (resource === 'channel') {
-					row = await executeChannel.call(this, client, operation, i);
-				} else if (resource === 'agentDef') {
-					row = await executeAgentDef.call(this, client, operation, i);
-				} else if (resource === 'skillDef') {
-					row = await executeSkillDef.call(this, client, operation, i);
-				} else if (resource === 'mcpServerDef') {
-					row = await executeMcpServerDef.call(this, client, operation, i);
-				} else if (resource === 'scheduleDef') {
-					row = await executeScheduleDef.call(this, client, operation, i);
-				} else if (resource === 'hook') {
-					row = await executeHook.call(this, client, operation, i);
-				} else {
-					throw new NodeOperationError(this.getNode(), `Unknown resource: ${resource}`);
-				}
-
-				if (row !== undefined) {
-					returnData.push({ json: row, pairedItem: { item: i } });
-				}
-			} catch (err) {
-				const wrapped = wrapLoomcycleError(err, this.getNode());
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: { error: wrapped.message },
-						error: wrapped as NodeOperationError,
-						pairedItem: { item: i },
-					});
-					continue;
-				}
-				throw wrapped;
+			if (resource === 'run') {
+				row = await executeRun(ctx, client, operation, i);
+			} else if (resource === 'memory') {
+				row = await executeMemory(ctx, client, operation, i);
+			} else if (resource === 'channel') {
+				row = await executeChannel(ctx, client, operation, i);
+			} else if (resource === 'agentDef') {
+				row = await executeAgentDef(ctx, client, operation, i);
+			} else if (resource === 'skillDef') {
+				row = await executeSkillDef(ctx, client, operation, i);
+			} else if (resource === 'mcpServerDef') {
+				row = await executeMcpServerDef(ctx, client, operation, i);
+			} else if (resource === 'scheduleDef') {
+				row = await executeScheduleDef(ctx, client, operation, i);
+			} else if (resource === 'hook') {
+				row = await executeHook(ctx, client, operation, i);
+			} else {
+				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
-		}
 
-		return [returnData];
+			if (row !== undefined) {
+				returnData.push({ json: row, pairedItem: { item: i } });
+			}
+		} catch (err) {
+			const wrapped = wrapLoomcycleError(err, ctx.getNode());
+			if (ctx.continueOnFail()) {
+				returnData.push({
+					json: { error: wrapped.message },
+					error: wrapped as NodeOperationError,
+					pairedItem: { item: i },
+				});
+				continue;
+			}
+			throw wrapped;
+		}
 	}
+
+	return [returnData];
 }
+
+type LoomClient = Awaited<ReturnType<typeof getClient>>;
 
 // ---- Resource dispatchers ----
 
 async function executeRun(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
 	if (operation === 'spawn') {
-		const agent = this.getNodeParameter('agent', i) as string;
-		const prompt = this.getNodeParameter('prompt', i) as string;
-		const userIdParam = this.getNodeParameter('userId', i, '') as string;
-		const userTierParam = this.getNodeParameter('userTier', i, '') as string;
-		const treatPromptAsUntrusted = this.getNodeParameter('treatPromptAsUntrusted', i, false) as boolean;
-		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const agent = ctx.getNodeParameter('agent', i) as string;
+		const prompt = ctx.getNodeParameter('prompt', i) as string;
+		const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+		const userTierParam = ctx.getNodeParameter('userTier', i, '') as string;
+		const treatPromptAsUntrusted = ctx.getNodeParameter('treatPromptAsUntrusted', i, false) as boolean;
+		const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
 
-		const userId = userIdParam || (await getCredentialDefault(this, 'userId'));
-		const userTier = userTierParam || (await getCredentialDefault(this, 'userTier'));
+		const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
+		const userTier = userTierParam || (await getCredentialDefault(ctx, 'userTier'));
 
 		const runOpts: RunOptions = {
 			agent,
@@ -198,15 +137,15 @@ async function executeRun(
 	}
 
 	if (operation === 'getStatus') {
-		const agentId = this.getNodeParameter('agentId', i) as string;
+		const agentId = ctx.getNodeParameter('agentId', i) as string;
 		const agent = await client.getAgent(agentId);
 		return agent as unknown as IDataObject;
 	}
 
 	if (operation === 'wait') {
-		const agentId = this.getNodeParameter('agentId', i) as string;
-		const pollIntervalMs = this.getNodeParameter('pollIntervalMs', i, 1000) as number;
-		const timeoutSec = this.getNodeParameter('timeoutSec', i, 300) as number;
+		const agentId = ctx.getNodeParameter('agentId', i) as string;
+		const pollIntervalMs = ctx.getNodeParameter('pollIntervalMs', i, 1000) as number;
+		const timeoutSec = ctx.getNodeParameter('timeoutSec', i, 300) as number;
 		const deadline = Date.now() + timeoutSec * 1000;
 
 		while (true) {
@@ -216,7 +155,7 @@ async function executeRun(
 			}
 			if (Date.now() >= deadline) {
 				throw new NodeOperationError(
-					this.getNode(),
+					ctx.getNode(),
 					`Timed out after ${timeoutSec}s waiting for agent ${agentId} to finish (current status: ${agent.status}).`,
 				);
 			}
@@ -225,19 +164,19 @@ async function executeRun(
 	}
 
 	if (operation === 'cancel') {
-		const agentId = this.getNodeParameter('agentId', i) as string;
-		const reason = this.getNodeParameter('reason', i, '') as string;
+		const agentId = ctx.getNodeParameter('agentId', i) as string;
+		const reason = ctx.getNodeParameter('reason', i, '') as string;
 		const result = await client.cancelAgent(agentId, reason ? { reason } : undefined);
 		return result as unknown as IDataObject;
 	}
 
 	if (operation === 'listAgents') {
-		const userIdParam = this.getNodeParameter('userId', i, '') as string;
-		const statusFilter = this.getNodeParameter('statusFilter', i, '') as string;
-		const userId = userIdParam || (await getCredentialDefault(this, 'userId'));
+		const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+		const statusFilter = ctx.getNodeParameter('statusFilter', i, '') as string;
+		const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
 		if (!userId) {
 			throw new NodeOperationError(
-				this.getNode(),
+				ctx.getNode(),
 				'User ID is required for List Agents — set per-node or as a Default User ID on the credential.',
 			);
 		}
@@ -246,12 +185,12 @@ async function executeRun(
 		return { agents } as unknown as IDataObject;
 	}
 
-	throw new NodeOperationError(this.getNode(), `Unknown run operation: ${operation}`);
+	throw new NodeOperationError(ctx.getNode(), `Unknown run operation: ${operation}`);
 }
 
 async function executeMemory(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
@@ -261,15 +200,15 @@ async function executeMemory(
 	}
 
 	if (operation === 'listScopeIDs') {
-		const scope = this.getNodeParameter('scope', i) as string;
+		const scope = ctx.getNodeParameter('scope', i) as string;
 		const resp = await client.listMemoryScopeIDs(scope);
 		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'listEntries') {
-		const scope = this.getNodeParameter('scope', i) as string;
-		const scopeID = this.getNodeParameter('scopeID', i) as string;
-		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
 		const optsAny: { prefix?: string; limit?: number; signal?: AbortSignal } = {};
 		if (additionalFields.prefix) optsAny.prefix = additionalFields.prefix as string;
 		if (typeof additionalFields.limit === 'number') optsAny.limit = additionalFields.limit;
@@ -278,18 +217,18 @@ async function executeMemory(
 	}
 
 	if (operation === 'getEntry') {
-		const scope = this.getNodeParameter('scope', i) as string;
-		const scopeID = this.getNodeParameter('scopeID', i) as string;
-		const key = this.getNodeParameter('key', i) as string;
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const key = ctx.getNodeParameter('key', i) as string;
 		const resp = await client.getMemoryEntry(scope, scopeID, key);
 		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'setEntry') {
-		const scope = this.getNodeParameter('scope', i) as string;
-		const scopeID = this.getNodeParameter('scopeID', i) as string;
-		const key = this.getNodeParameter('key', i) as string;
-		const rawValue = this.getNodeParameter('value', i, '{}') as unknown;
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const key = ctx.getNodeParameter('key', i) as string;
+		const rawValue = ctx.getNodeParameter('value', i, '{}') as unknown;
 		// Pre-validate empty/blank — setEntry is a destructive upsert,
 		// and parseJsonField's strict mode coerces an empty trimmed
 		// string to `{}` (its general default for empty input). For a
@@ -299,7 +238,7 @@ async function executeMemory(
 		// empty object.
 		if (typeof rawValue === 'string' && rawValue.trim() === '') {
 			throw new NodeOperationError(
-				this.getNode(),
+				ctx.getNode(),
 				'Value is required for Set Entry — enter a valid JSON value (object, array, primitive, or null). An empty value would silently overwrite the stored entry with `{}`.',
 			);
 		}
@@ -307,8 +246,8 @@ async function executeMemory(
 		// server-side as raw strings — surprising on read-back, so we
 		// require valid JSON syntactically (anything from a primitive
 		// to an object is fine; the substrate stores opaque JSON).
-		const value = parseJsonField(rawValue, { strict: true, node: this.getNode() });
-		const setOptions = this.getNodeParameter('setOptions', i, {}) as IDataObject;
+		const value = parseJsonField(rawValue, { strict: true, node: ctx.getNode() });
+		const setOptions = ctx.getNodeParameter('setOptions', i, {}) as IDataObject;
 		const opts: SetMemoryEntryOptions = { value };
 		if (setOptions.embed === true) opts.embed = true;
 		if (typeof setOptions.ttlSeconds === 'number' && setOptions.ttlSeconds > 0) {
@@ -319,20 +258,20 @@ async function executeMemory(
 	}
 
 	if (operation === 'deleteEntry') {
-		const scope = this.getNodeParameter('scope', i) as string;
-		const scopeID = this.getNodeParameter('scopeID', i) as string;
-		const key = this.getNodeParameter('key', i) as string;
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const key = ctx.getNodeParameter('key', i) as string;
 		await client.deleteMemoryEntry(scope, scopeID, key);
 		// Adapter returns void on 204; surface a consistent ok envelope for n8n
 		return { ok: true, scope, scope_id: scopeID, key } as IDataObject;
 	}
 
-	throw new NodeOperationError(this.getNode(), `Unknown memory operation: ${operation}`);
+	throw new NodeOperationError(ctx.getNode(), `Unknown memory operation: ${operation}`);
 }
 
 async function executeChannel(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
@@ -345,8 +284,8 @@ async function executeChannel(
 	// scope (runtime channel registry), distinct from the per-message
 	// scope/userId triple used by publish/subscribe/peek/ack.
 	if (operation === 'createChannel') {
-		const name = this.getNodeParameter('channelName', i) as string;
-		const settings = this.getNodeParameter('channelSettings', i, {}) as IDataObject;
+		const name = ctx.getNodeParameter('channelName', i) as string;
+		const settings = ctx.getNodeParameter('channelSettings', i, {}) as IDataObject;
 		const opts: CreateChannelOptions = { name };
 		if (settings.description) opts.description = settings.description as string;
 		if (settings.scope) opts.scope = settings.scope as string;
@@ -364,8 +303,8 @@ async function executeChannel(
 	}
 
 	if (operation === 'updateChannel') {
-		const name = this.getNodeParameter('channelName', i) as string;
-		const settings = this.getNodeParameter('updateSettings', i, {}) as IDataObject;
+		const name = ctx.getNodeParameter('channelName', i) as string;
+		const settings = ctx.getNodeParameter('updateSettings', i, {}) as IDataObject;
 		const opts: UpdateChannelOptions = {};
 		if (settings.description !== undefined) opts.description = settings.description as string;
 		if (settings.semantic) opts.semantic = settings.semantic as string;
@@ -387,31 +326,31 @@ async function executeChannel(
 	}
 
 	if (operation === 'deleteChannel') {
-		const name = this.getNodeParameter('channelName', i) as string;
+		const name = ctx.getNodeParameter('channelName', i) as string;
 		await client.deleteChannel(name);
 		// Adapter returns void on success; surface a consistent ok envelope
 		return { ok: true, name } as IDataObject;
 	}
 
-	const channel = this.getNodeParameter('channel', i) as string;
-	const scope = this.getNodeParameter('scope', i, 'global') as ChannelScope;
-	const userIdParam = this.getNodeParameter('userId', i, '') as string;
-	const userId = scope === 'user' ? userIdParam || (await getCredentialDefault(this, 'userId')) : undefined;
+	const channel = ctx.getNodeParameter('channel', i) as string;
+	const scope = ctx.getNodeParameter('scope', i, 'global') as ChannelScope;
+	const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+	const userId = scope === 'user' ? userIdParam || (await getCredentialDefault(ctx, 'userId')) : undefined;
 	if (scope === 'user' && !userId) {
 		throw new NodeOperationError(
-			this.getNode(),
+			ctx.getNode(),
 			'User ID is required when Scope = User — set per-node or as a Default User ID on the credential.',
 		);
 	}
 
 	if (operation === 'publish') {
-		const rawPayload = this.getNodeParameter('payload', i, '{}') as unknown;
+		const rawPayload = ctx.getNodeParameter('payload', i, '{}') as unknown;
 		// Strict JSON: a Channel publish payload that isn't a valid JSON
 		// value (object/array/string/number) would land server-side as a
 		// raw string — confusing for downstream consumers expecting
 		// structured data. Throw early so the operator sees the typo.
-		const payload = parseJsonField(rawPayload, { strict: true, node: this.getNode() });
-		const deliverAt = this.getNodeParameter('deliverAt', i, '') as string;
+		const payload = parseJsonField(rawPayload, { strict: true, node: ctx.getNode() });
+		const deliverAt = ctx.getNodeParameter('deliverAt', i, '') as string;
 		const resp = await client.publishChannel(channel, {
 			scope,
 			userId,
@@ -422,7 +361,7 @@ async function executeChannel(
 	}
 
 	if (operation === 'subscribe') {
-		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
 		const resp = await client.subscribeChannel(channel, {
 			scope,
 			userId,
@@ -434,7 +373,7 @@ async function executeChannel(
 	}
 
 	if (operation === 'peek') {
-		const additionalFields = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
 		const resp = await client.peekChannel(channel, {
 			scope,
 			userId,
@@ -445,59 +384,59 @@ async function executeChannel(
 	}
 
 	if (operation === 'ack') {
-		const cursor = this.getNodeParameter('cursor', i) as string;
+		const cursor = ctx.getNodeParameter('cursor', i) as string;
 		const resp = await client.ackChannel(channel, { scope, userId, cursor });
 		return resp as unknown as IDataObject;
 	}
 
-	throw new NodeOperationError(this.getNode(), `Unknown channel operation: ${operation}`);
+	throw new NodeOperationError(ctx.getNode(), `Unknown channel operation: ${operation}`);
 }
 
 // ---- Substrate-admin dispatchers (AgentDef / SkillDef / MCPServerDef) ----
 
 async function executeAgentDef(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
-	const input = buildSubstrateInput.call(this, operation, i);
+	const input = buildSubstrateInput(ctx, operation, i);
 	const resp = await client.agentDef(input);
 	return { result: resp } as IDataObject;
 }
 
 async function executeSkillDef(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
-	const input = buildSubstrateInput.call(this, operation, i);
+	const input = buildSubstrateInput(ctx, operation, i);
 	const resp = await client.skillDef(input);
 	return { result: resp } as IDataObject;
 }
 
 async function executeMcpServerDef(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
-	const input = buildSubstrateInput.call(this, operation, i);
+	const input = buildSubstrateInput(ctx, operation, i);
 
 	// MCPServerDef-specific: structured Register UI assembles transport
 	// + url + headers as direct overlay fields (Fork uses the JSON
 	// overlay textarea instead).
 	if (operation === 'create') {
-		const transport = this.getNodeParameter('transport', i) as string;
+		const transport = ctx.getNodeParameter('transport', i) as string;
 		if (transport !== 'http' && transport !== 'streamable-http') {
 			throw new NodeOperationError(
-				this.getNode(),
+				ctx.getNode(),
 				`Transport must be HTTP or Streamable-HTTP. Stdio MCP servers must be declared in loomcycle.yaml (not via dynamic registration).`,
 			);
 		}
-		const url = this.getNodeParameter('url', i) as string;
-		const headers = collectNameValuePairs(this.getNodeParameter('headers', i, {}), 'header');
+		const url = ctx.getNodeParameter('url', i) as string;
+		const headers = collectNameValuePairs(ctx.getNodeParameter('headers', i, {}), 'header');
 		input.transport = transport;
 		input.url = url;
 		if (Object.keys(headers).length > 0) input.headers = headers;
@@ -515,24 +454,24 @@ async function executeMcpServerDef(
  * 5 ops only — no `promote` op, no `verify` op (RFC E v1.x schema).
  */
 async function executeScheduleDef(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
 	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
 
-	const name = this.getNodeParameter('name', i, '') as string;
+	const name = ctx.getNodeParameter('name', i, '') as string;
 	if (name) input.name = name;
-	const defId = this.getNodeParameter('defId', i, '') as string;
+	const defId = ctx.getNodeParameter('defId', i, '') as string;
 	if (defId) input.def_id = defId;
-	const parentDefId = this.getNodeParameter('parentDefId', i, '') as string;
+	const parentDefId = ctx.getNodeParameter('parentDefId', i, '') as string;
 	if (parentDefId) input.parent_def_id = parentDefId;
-	const description = this.getNodeParameter('defDescription', i, '') as string;
+	const description = ctx.getNodeParameter('defDescription', i, '') as string;
 	if (description) input.description = description;
 
 	if (operation === 'create' || operation === 'fork') {
-		input.promote = this.getNodeParameter('promote', i, true) as boolean;
+		input.promote = ctx.getNodeParameter('promote', i, true) as boolean;
 
 		// Build the overlay (the schedule's content-bearing fields). For
 		// Fork, start from the operator's JSON diff and layer credentials
@@ -541,9 +480,9 @@ async function executeScheduleDef(
 		// rather than a string masquerading as an object.
 		const overlay: Record<string, unknown> = {};
 		if (operation === 'fork') {
-			const parsed = parseJsonField(this.getNodeParameter('overlay', i, '{}'), {
+			const parsed = parseJsonField(ctx.getNodeParameter('overlay', i, '{}'), {
 				strict: true,
-				node: this.getNode(),
+				node: ctx.getNode(),
 			});
 			if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
 				Object.assign(overlay, parsed as Record<string, unknown>);
@@ -551,10 +490,10 @@ async function executeScheduleDef(
 		}
 
 		if (operation === 'create') {
-			const schedule = this.getNodeParameter('schedule', i) as string;
-			const agent = this.getNodeParameter('agent', i) as string;
-			const prompt = this.getNodeParameter('prompt', i) as string;
-			const extra = this.getNodeParameter('additionalFields', i, {}) as IDataObject;
+			const schedule = ctx.getNodeParameter('schedule', i) as string;
+			const agent = ctx.getNodeParameter('agent', i) as string;
+			const prompt = ctx.getNodeParameter('prompt', i) as string;
+			const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
 			const treatPromptAsUntrusted = extra.treatPromptAsUntrusted === true;
 
 			overlay.schedule = schedule;
@@ -575,7 +514,7 @@ async function executeScheduleDef(
 		// Create and Fork. A template fork declaring required_credentials
 		// loud-fails server-side if these keys are missing.
 		const userCredentials = collectNameValuePairs(
-			this.getNodeParameter('userCredentials', i, {}),
+			ctx.getNodeParameter('userCredentials', i, {}),
 			'credential',
 		);
 		if (Object.keys(userCredentials).length > 0) overlay.user_credentials = userCredentials;
@@ -594,26 +533,26 @@ async function executeScheduleDef(
  * on (owner, name) without the operator inventing an owner string.
  */
 async function executeHook(
-	this: IExecuteFunctions,
-	client: Awaited<ReturnType<typeof getClient>>,
+	ctx: IExecuteFunctions,
+	client: LoomClient,
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
 	if (operation === 'register') {
-		const ownerParam = this.getNodeParameter('owner', i, '') as string;
+		const ownerParam = ctx.getNodeParameter('owner', i, '') as string;
 		const opts: RegisterHookOptions = {
-			owner: ownerParam || `n8n:${this.getNode().id}`,
-			name: this.getNodeParameter('name', i) as string,
-			phase: this.getNodeParameter('phase', i) as HookPhase,
-			callbackUrl: this.getNodeParameter('callbackUrl', i) as string,
+			owner: ownerParam || `n8n:${ctx.getNode().id}`,
+			name: ctx.getNodeParameter('name', i) as string,
+			phase: ctx.getNodeParameter('phase', i) as HookPhase,
+			callbackUrl: ctx.getNodeParameter('callbackUrl', i) as string,
 		};
-		const agents = parseCsv(this.getNodeParameter('agents', i, '') as string);
+		const agents = parseCsv(ctx.getNodeParameter('agents', i, '') as string);
 		if (agents !== undefined) opts.agents = agents;
-		const tools = parseCsv(this.getNodeParameter('tools', i, '') as string);
+		const tools = parseCsv(ctx.getNodeParameter('tools', i, '') as string);
 		if (tools !== undefined) opts.tools = tools;
-		const failMode = this.getNodeParameter('failMode', i, 'open') as HookFailMode;
+		const failMode = ctx.getNodeParameter('failMode', i, 'open') as HookFailMode;
 		if (failMode) opts.failMode = failMode;
-		const timeoutMs = this.getNodeParameter('timeoutMs', i, 0) as number;
+		const timeoutMs = ctx.getNodeParameter('timeoutMs', i, 0) as number;
 		if (typeof timeoutMs === 'number' && timeoutMs > 0) opts.timeoutMs = timeoutMs;
 
 		const resp = await client.registerHook(opts);
@@ -626,13 +565,13 @@ async function executeHook(
 	}
 
 	if (operation === 'delete') {
-		const id = this.getNodeParameter('hookId', i) as string;
+		const id = ctx.getNodeParameter('hookId', i) as string;
 		await client.deleteHook(id);
 		// Adapter returns void on success; surface a consistent ok envelope
 		return { ok: true, id } as IDataObject;
 	}
 
-	throw new NodeOperationError(this.getNode(), `Unknown hook operation: ${operation}`);
+	throw new NodeOperationError(ctx.getNode(), `Unknown hook operation: ${operation}`);
 }
 
 /**
@@ -641,32 +580,32 @@ async function executeHook(
  * promote/retire; verify and rediscover ride the [extra: string]: unknown
  * index signature on SubstrateToolInput.
  */
-function buildSubstrateInput(this: IExecuteFunctions, operation: string, i: number): SubstrateToolInput {
+function buildSubstrateInput(ctx: IExecuteFunctions, operation: string, i: number): SubstrateToolInput {
 	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
 
-	const name = this.getNodeParameter('name', i, '') as string;
+	const name = ctx.getNodeParameter('name', i, '') as string;
 	if (name) input.name = name;
 
-	const defId = this.getNodeParameter('defId', i, '') as string;
+	const defId = ctx.getNodeParameter('defId', i, '') as string;
 	if (defId) input.def_id = defId;
 
-	const parentDefId = this.getNodeParameter('parentDefId', i, '') as string;
+	const parentDefId = ctx.getNodeParameter('parentDefId', i, '') as string;
 	if (parentDefId) input.parent_def_id = parentDefId;
 
-	const description = this.getNodeParameter('defDescription', i, '') as string;
+	const description = ctx.getNodeParameter('defDescription', i, '') as string;
 	if (description) input.description = description;
 
 	if (operation === 'create' || operation === 'fork') {
-		const promote = this.getNodeParameter('promote', i, false) as boolean;
+		const promote = ctx.getNodeParameter('promote', i, false) as boolean;
 		input.promote = promote;
-		const overlay = parseJsonField(this.getNodeParameter('overlay', i, '{}'));
+		const overlay = parseJsonField(ctx.getNodeParameter('overlay', i, '{}'));
 		if (overlay && typeof overlay === 'object' && Object.keys(overlay as object).length > 0) {
 			input.overlay = overlay as Record<string, unknown>;
 		}
 	}
 
 	if (operation === 'verify') {
-		const contentSha256 = this.getNodeParameter('contentSha256', i, '') as string;
+		const contentSha256 = ctx.getNodeParameter('contentSha256', i, '') as string;
 		if (contentSha256) input.content_sha256 = contentSha256;
 	}
 
@@ -695,7 +634,7 @@ function collectNameValuePairs(raw: unknown, key: string): Record<string, string
 	return out;
 }
 
-// ---- Local helpers (kept inline; not shared) ----
+// ---- Local helpers ----
 
 function parseCsv(raw: unknown): string[] | undefined {
 	if (typeof raw !== 'string' || raw.trim() === '') return undefined;

@@ -25,21 +25,26 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Eight nodes plus one credential type.
+Fourteen nodes (8 action + 2 trigger + 4 cluster sub-nodes) plus one credential type.
 
 ### Credential
 
 - **LoomCycle API** — bearer token + base URL + optional Default User ID / User Tier / MCP URL. The credential test hits `GET /healthz`.
 
-### Action node (umbrella)
+### Action nodes
 
-- **LoomCycle** — single multi-resource node covering six op groups:
-  - **Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
-  - **Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD as of 1.2.0; reads + writes via `@loomcycle/client@^0.11.5`)
-  - **Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` (message-flow + runtime admin CRUD as of 1.2.0; yaml-declared channels remain immutable)
-  - **Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
-  - **Skill Definition** — same 7 ops as AgentDef, applied to skills
-  - **MCP Server Definition** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
+As of **2.0.0** the former single multi-resource umbrella node is split into **eight dedicated action nodes**, each with its own canvas icon (n8n renders one icon per node type — separate nodes are the only way to give each entity a distinct glyph). All eight share one credential and one wire client; they are drag-and-drop separate in the node picker.
+
+- **LoomCycle Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
+- **LoomCycle Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD; per-tool credentials `userCredentials` map on Spawn require loomcycle ≥ v0.12.x)
+- **LoomCycle Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` (message-flow + runtime admin CRUD; yaml-declared channels remain immutable)
+- **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
+- **LoomCycle Skill Definition** — same 7 ops as AgentDef, applied to skills
+- **LoomCycle MCP Server** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
+- **LoomCycle Schedule** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — substrate-native scheduled runs (RFC E; requires loomcycle ≥ v0.12.x). Fired runs land on the **Run Completed** trigger.
+- **LoomCycle Hook** — `Register` / `List` / `Delete` — pre/post-tool webhook callbacks; point the callback URL at an n8n **Webhook** trigger to call back into a workflow on matched tool calls.
+
+> **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
 ### Trigger nodes
 

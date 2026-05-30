@@ -14,7 +14,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { LoomCycle } from '../../../nodes/LoomCycle/LoomCycle.node';
+import { LoomCycleHook as LoomCycle } from '../../../nodes/LoomCycleHook/LoomCycleHook.node';
 import { makeExecuteContext } from './_helpers';
 
 beforeEach(() => {

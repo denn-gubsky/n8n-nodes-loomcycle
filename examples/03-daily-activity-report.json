@@ -16,7 +16,7 @@
 		{
 			"id": "node-list-completed",
 			"name": "LoomCycle: List Completed",
-			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleRun",
 			"typeVersion": 1,
 			"position": [450, 200],
 			"parameters": {
@@ -35,7 +35,7 @@
 		{
 			"id": "node-list-failed",
 			"name": "LoomCycle: List Failed",
-			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycle",
+			"type": "@loomcycle/n8n-nodes-loomcycle.loomCycleRun",
 			"typeVersion": 1,
 			"position": [450, 400],
 			"parameters": {

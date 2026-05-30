@@ -27,7 +27,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { LoomCycle } from '../../../nodes/LoomCycle/LoomCycle.node';
+import { LoomCycleRun as LoomCycle } from '../../../nodes/LoomCycleRun/LoomCycleRun.node';
 import { makeExecuteContext, asAsyncIterable, fakeSuccessfulRunEvents } from './_helpers';
 import { AgentNotFoundError } from '@loomcycle/client';
 
