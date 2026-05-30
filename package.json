@@ -14,7 +14,7 @@
 		"mcp",
 		"agent"
 	],
-	"license": "Apache-2.0",
+	"license": "MIT",
 	"homepage": "https://github.com/denn-gubsky/n8n-nodes-loomcycle#readme",
 	"author": {
 		"name": "Dennis Gubsky"

@@ -8,7 +8,7 @@ Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle
 
 [![CI](https://github.com/denn-gubsky/n8n-nodes-loomcycle/workflows/ci/badge.svg)](https://github.com/denn-gubsky/n8n-nodes-loomcycle/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@loomcycle/n8n-nodes-loomcycle)](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
 
@@ -226,4 +226,4 @@ n8n's cluster-node API stabilised at `1.82.0`. Older n8n versions won't show the
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
