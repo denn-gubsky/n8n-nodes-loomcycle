@@ -134,6 +134,44 @@ export const runOps: INodeProperties[] = [
 				description: 'Comma-separated tool-name list to narrow the agent\'s allowed_tools beyond the operator floor. Empty = no narrowing.',
 			},
 			{
+				// RFC F (loomcycle v0.12.x): per-tool named credentials map.
+				// Template-string values only (${LOOMCYCLE_*} / ${run.*}) —
+				// plaintext secrets must never travel this wire path
+				// (CLAUDE.md §security). userBearer above auto-promotes to
+				// the `default` key for back-compat, so leave that key free.
+				displayName: 'Per-Tool Credentials',
+				name: 'userCredentials',
+				type: 'fixedCollection',
+				placeholder: 'Add Credential',
+				default: {},
+				typeOptions: { multipleValues: true },
+				options: [
+					{
+						name: 'credential',
+						displayName: 'Credential',
+						values: [
+							{
+								displayName: 'Name',
+								name: 'name',
+								type: 'string',
+								default: '',
+								required: true,
+								description: 'Credential key referenced by tools as `${run.credentials.&lt;name&gt;}`',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+								required: true,
+								description: 'Template string only (e.g. `${LOOMCYCLE_GITHUB_TOKEN}`). Plaintext credentials never travel this wire path.',
+							},
+						],
+					},
+				],
+				description: 'Per-tool named credentials (RFC F) injected into MCP server headers per run. Template strings only.',
+			},
+			{
 				displayName: 'Session ID',
 				name: 'sessionId',
 				type: 'string',
