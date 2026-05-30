@@ -6,5 +6,4 @@
     <circle cx="30" cy="30" r="16"/>
     <path d="M22 30 L28 36 L40 22"/>
   </g>
-  <circle cx="30" cy="30" r="3" fill="#22d3ee"/>
 </svg>
