@@ -32,7 +32,10 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
-      - run: npm ci
+      # npm install (not ci): @n8n/ai-node-sdk's tree (@langchain/community →
+      # ignore@7 vs eslint's ignore@5) is not npm-ci-consistent. The lockfile
+      # isn't published (files: ["dist"]), so this is build-time only.
+      - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
