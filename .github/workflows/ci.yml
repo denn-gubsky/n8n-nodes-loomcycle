@@ -27,3 +27,26 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+  # n8n's official community-node conformance linter — the gate n8n runs when
+  # vetting a verification submission. Keeping it green here keeps the package
+  # submission-ready on every push.
+  conformance:
+    name: n8n-node lint (verification conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      # `n8n-node lint` shells out to eslint resolved from the project's own
+      # node_modules, so install deps first — this gives it the repo's eslint
+      # (+ eslint-plugin-n8n-nodes-base). Without it the CLI fetches eslint@10
+      # (flat-config-only) and errors "couldn't find eslint.config".
+      - run: npm ci
+      # n8n's official conformance linter. Node 22 = isolated-vm's required
+      # engine (compiles cleanly on ubuntu runners). Pinned for reproducible
+      # results; bump deliberately when adopting new rule sets.
+      - run: npx --yes @n8n/node-cli@0.32.1 lint
