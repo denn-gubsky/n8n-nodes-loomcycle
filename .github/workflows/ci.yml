@@ -27,3 +27,23 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+  # n8n's official community-node conformance linter — the gate n8n runs when
+  # vetting a verification submission. Keeping it green here keeps the package
+  # submission-ready on every push.
+  conformance:
+    name: n8n-node lint (verification conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      # @n8n/node-cli bundles isolated-vm (native; used only by its dev server,
+      # not by `lint`). --ignore-scripts skips that native build, so the check
+      # is fast and needs no python/gyp toolchain. Node 22 is isolated-vm's
+      # declared engine even when the binary is unbuilt. Pinned for reproducible
+      # conformance results; bump deliberately when adopting new rule sets.
+      - run: npm install -g @n8n/node-cli@0.32.1 --ignore-scripts
+      - run: n8n-node lint
