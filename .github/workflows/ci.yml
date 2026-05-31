@@ -40,9 +40,13 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
-      # n8n's official conformance linter, run the as-designed way via npx so
-      # the CLI's bundled eslint + flat config resolve correctly. Node 22 is
-      # required by its isolated-vm dependency, which compiles cleanly there
-      # (ubuntu runners ship the gyp toolchain). Pinned for reproducible
-      # conformance results; bump deliberately when adopting new rule sets.
+          cache: 'npm'
+      # `n8n-node lint` shells out to eslint resolved from the project's own
+      # node_modules, so install deps first — this gives it the repo's eslint
+      # (+ eslint-plugin-n8n-nodes-base). Without it the CLI fetches eslint@10
+      # (flat-config-only) and errors "couldn't find eslint.config".
+      - run: npm ci
+      # n8n's official conformance linter. Node 22 = isolated-vm's required
+      # engine (compiles cleanly on ubuntu runners). Pinned for reproducible
+      # results; bump deliberately when adopting new rule sets.
       - run: npx --yes @n8n/node-cli@0.32.1 lint
