@@ -7,9 +7,10 @@ import type {
 	SupplyData,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { supplyModel } from '@n8n/ai-node-sdk';
 
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
-import { LoomcycleChatModel } from '../_shared/langchainChatModel';
+import { LoomcycleChatModel } from '../_shared/loomcycleChatModel';
 
 /**
  * `LoomCycle Chat Model` — cluster sub-node that plugs into n8n's AI
@@ -34,23 +35,13 @@ import { LoomcycleChatModel } from '../_shared/langchainChatModel';
  * What this does NOT do:
  *   - **No loomcycle agent loop.** No DB row, no snapshot, no hook
  *     pipeline, no MCP registration check. The gateway is the thin
- *     resolver-front-end. If you want the full agent loop (with tools,
- *     memory, hooks), use the LoomCycle Sub-Agent Tool — that's a
- *     different layer.
- *   - **No streaming reconnect.** The gateway stream is single-shot;
- *     if it drops, the caller's retry kicks in. Different from the
- *     RunCompleted trigger's `streamUserRunStates` which has 30-min
- *     server cap + auto-reconnect.
+ *     resolver-front-end. For the full agent loop (tools, memory, hooks),
+ *     use the LoomCycle Run action node.
  *
- * Dual-mode (n8n v1.82+ compatibility):
- *   - `supplyData()` returns a `LoomcycleChatModel` instance for older
- *     AI Agent modes (OpenAI Functions Agent, Conversational Agent).
- *   - `execute()` is included as a stub that throws a helpful error —
- *     Chat Models aren't invoked directly by n8n's execute pipeline
- *     the way Tools are, but the lint rule
- *     `node-class-description-outputs-wrong` doesn't catch this nuance
- *     and the dual-method pattern is what unblocked Tools Agent for
- *     the cluster *tool* sub-nodes in v1.0.4.
+ * Built on **`@n8n/ai-node-sdk`** (`BaseChatModel` + `supplyModel`) — the
+ * langchain-free path n8n Cloud requires for verified community nodes
+ * (v3.0.0). `supplyData()` returns the model via `supplyModel`; `execute()`
+ * is a sentinel that throws if the node is ever run as a standalone step.
  */
 export class LoomCycleChatModel implements INodeType {
 	description: INodeTypeDescription = {
@@ -124,14 +115,6 @@ export class LoomCycleChatModel implements INodeType {
 				typeOptions: { minValue: -1, maxValue: 2, numberPrecision: 2 },
 				description: 'Sampling temperature. Set to -1 to use the provider default (recommended for most use cases).',
 			},
-			{
-				displayName: 'Streaming',
-				name: 'streaming',
-				type: 'boolean',
-				default: true,
-				description:
-					'Whether to enable token-by-token streaming. Disable if the consumer expects a single non-streaming response (some older AI Agent modes).',
-			},
 		],
 	};
 
@@ -143,7 +126,6 @@ export class LoomCycleChatModel implements INodeType {
 		const userTierParam = this.getNodeParameter('userTier', 0, '') as string;
 		const maxTokens = this.getNodeParameter('maxTokens', 0, 4096) as number;
 		const temperatureParam = this.getNodeParameter('temperature', 0, -1) as number;
-		const streaming = this.getNodeParameter('streaming', 0, true) as boolean;
 
 		const client = await getClient(this);
 		const userIdDefault = await getCredentialDefault(this, 'userId');
@@ -162,18 +144,17 @@ export class LoomCycleChatModel implements INodeType {
 			maxTokens,
 			// Sentinel: -1 means "don't pass to gateway" (provider default).
 			temperature: temperatureParam === -1 ? undefined : temperatureParam,
-			streaming,
 		});
 
-		return { response: model };
+		return supplyModel(this, model);
 	}
 
 	/**
-	 * AI Language Models don't get invoked through n8n's execute pipeline
-	 * the same way Tool sub-nodes do — the AI Agent wires this in via
-	 * `supplyData` and invokes the LangChain `BaseChatModel` directly.
-	 * Provide a sentinel execute() to surface a clear error if n8n ever
-	 * tries to invoke this node as a regular action node.
+	 * AI Language Models aren't invoked through n8n's execute pipeline the
+	 * way action nodes are — the AI Agent wires this in via `supplyData` and
+	 * drives the model through the ai-node-sdk contract. Provide a sentinel
+	 * execute() to surface a clear error if n8n ever tries to invoke this
+	 * node as a regular action node.
 	 */
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		throw new NodeOperationError(

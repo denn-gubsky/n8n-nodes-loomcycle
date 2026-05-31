@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
@@ -45,7 +45,7 @@ jobs:
       # node_modules, so install deps first — this gives it the repo's eslint
       # (+ eslint-plugin-n8n-nodes-base). Without it the CLI fetches eslint@10
       # (flat-config-only) and errors "couldn't find eslint.config".
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       # n8n's official conformance linter. Node 22 = isolated-vm's required
       # engine (compiles cleanly on ubuntu runners). Pinned for reproducible
       # results; bump deliberately when adopting new rule sets.
