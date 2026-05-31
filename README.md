@@ -2,13 +2,18 @@
   <img src=".github/social-preview.png" alt="n8n-nodes-loomcycle — loomcycle agentic runtime nodes for n8n" width="720">
 </p>
 
-# n8n-nodes-loomcycle
+# n8n-nodes-loomcycle-full
 
 Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle) agentic runtime — design and operate loomcycle agents directly from n8n's visual builder.
 
-[![CI](https://github.com/denn-gubsky/n8n-nodes-loomcycle/workflows/ci/badge.svg)](https://github.com/denn-gubsky/n8n-nodes-loomcycle/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@loomcycle/n8n-nodes-loomcycle)](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)
+[![npm](https://img.shields.io/npm/v/@loomcycle/n8n-nodes-loomcycle-full)](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle-full)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+> ## 📦 Which package do I want?
+> This is **`@loomcycle/n8n-nodes-loomcycle-full`** — the **full self-hosted edition** (18 nodes), including the langchain-based **AI-Agent Tool sub-nodes** (Memory / Channel / Sub-Agent / MCP Server Tool), **SSE-push** triggers, and the Run **Wait for Completion** op.
+> - **It is NOT n8n-Cloud-verified** and won't pass n8n's community-node scanner (it depends on `@langchain/core` and uses timers/SSE, which Cloud disallows). **Install it manually on self-hosted n8n.**
+> - If you're on **n8n Cloud** or want the verified node, use the slim **[`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)** (14 nodes; zero deps; poll-based triggers; Chat Model on `@n8n/ai-node-sdk`).
+> - Both are built from this repo: the slim package from `main`, this full edition from the long-lived [`full-edition`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/full-edition) branch.
 
 This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
 
@@ -25,8 +30,8 @@ These nodes are a thin n8n-shaped wrapper over loomcycle's wire API — they **c
 ## Quick install
 
 ```bash
-# In your n8n Settings → Community Nodes → Install:
-@loomcycle/n8n-nodes-loomcycle
+# Self-hosted n8n → Settings → Community Nodes → Install:
+@loomcycle/n8n-nodes-loomcycle-full
 ```
 
 Once installed, configure the **LoomCycle API** credential with your loomcycle deployment's bearer token + base URL.
@@ -139,7 +144,7 @@ npm link
 
 # In your n8n install (e.g. ~/.n8n/nodes):
 cd ~/.n8n/nodes
-npm link @loomcycle/n8n-nodes-loomcycle
+npm link @loomcycle/n8n-nodes-loomcycle-full
 
 # Then restart n8n. The 7 nodes appear under the "LoomCycle" prefix in
 # the node picker.

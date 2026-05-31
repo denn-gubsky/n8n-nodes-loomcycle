@@ -1,10 +1,10 @@
 {
-	"name": "@loomcycle/n8n-nodes-loomcycle",
+	"name": "@loomcycle/n8n-nodes-loomcycle-full",
 	"version": "2.1.2",
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 18 nodes — 11 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card), 2 triggers, and 5 AI-Agent cluster sub-nodes — plus dynamic MCP server provisioning. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x).",
+	"description": "FULL self-hosted edition of the loomcycle n8n nodes — superset of @loomcycle/n8n-nodes-loomcycle. Adds the langchain-based AI-Agent Tool sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool), SSE-push triggers, and the Run 'Wait for Completion' op that n8n Cloud verification disallows. 18 nodes total. NOT n8n-Cloud-verified — install manually on self-hosted n8n. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials ≥ v0.12.x; Webhook + A2A ≥ v0.14.x).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",

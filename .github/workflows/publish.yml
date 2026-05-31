@@ -1,13 +1,14 @@
-# Publish workflow — fires on v*.*.* tags + manual dispatch.
-# Uses npm provenance to attest the package was built from this repo.
-# No untrusted-input substitutions (issue titles, PR bodies, commit
-# messages); only the safe github.ref (tag name) flows via the trigger.
-name: publish
+# Publish workflow (full-edition branch) — fires on full-v*.*.* tags.
+# Publishes @loomcycle/n8n-nodes-loomcycle-full (the self-hosted superset).
+# Distinct tag prefix from main's `v*.*.*` so the two packages publish
+# independently from the same repo. Uses npm provenance.
+# No untrusted-input substitutions; only the safe github.ref (tag name).
+name: publish-full
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'full-v*.*.*'
   workflow_dispatch:
     inputs:
       dry_run:
