@@ -12,6 +12,32 @@ Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle
 
 This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
 
+## 📦 Two editions — which one do I want?
+
+This repo ships **two parallel packages** from **two branches**. Pick by where your n8n runs:
+
+| | **Slim** (this package) | **Full** |
+|---|---|---|
+| npm | [`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle) | [`@loomcycle/n8n-nodes-loomcycle-full`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle-full) |
+| branch | [`main`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/main) | [`full-edition`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/full-edition) |
+| nodes | **14** | **18** |
+| n8n Cloud **verified** | ✅ yes — passes n8n's community-node scanner (zero deps, no langchain, no timers) | ❌ no — self-hosted only, install manually |
+| AI-Agent **Tool** sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool) | — (wire the action nodes as Agent tools, or use the Chat Model) | ✅ included (langchain-based) |
+| Triggers | **poll**-based (n8n schedules) | **SSE-push** + poll fallback (lower latency) |
+| Run **Wait for Completion** op | — (use the Run Completed trigger / n8n Wait node) | ✅ included |
+| Chat Model | `@n8n/ai-node-sdk` (langchain-free) | langchain `BaseChatModel` |
+
+**Use the Slim package (this one)** if you're on **n8n Cloud**, want the verified node, or don't need the langchain Tool sub-nodes.
+
+**Switch to the Full edition** if you're **self-hosted** and want the extra nodes / SSE triggers / Wait op:
+
+```bash
+# Self-hosted n8n → Settings → Community Nodes → Install:
+@loomcycle/n8n-nodes-loomcycle-full
+```
+
+Both track the same loomcycle wire API and credential; they differ only in node surface + Cloud-eligibility. The rest of this README documents the **slim** package.
+
 ## Requirements
 
 These nodes are a thin n8n-shaped wrapper over loomcycle's wire API — they **call your loomcycle deployment**, they don't run an agent runtime inside n8n. So you need:
