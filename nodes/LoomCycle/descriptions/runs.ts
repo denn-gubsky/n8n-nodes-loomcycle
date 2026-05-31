@@ -47,12 +47,6 @@ export const runOps: INodeProperties[] = [
 				description: 'Spawn a new loomcycle agent run and wait synchronously for completion',
 				action: 'Spawn a run',
 			},
-			{
-				name: 'Wait for Completion',
-				value: 'wait',
-				description: 'Poll until the agent reaches a terminal state (completed/failed/cancelled)',
-				action: 'Wait for completion',
-			},
 		],
 		default: 'spawn',
 	},
@@ -202,35 +196,15 @@ export const runOps: INodeProperties[] = [
 		],
 	},
 
-	// ---- Get Status / Wait / Cancel: shared Agent ID ----
+	// ---- Get Status / Cancel: shared Agent ID ----
 	{
 		displayName: 'Agent ID',
 		name: 'agentId',
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['run'], operation: ['getStatus', 'wait', 'cancel'] } },
-		description: 'The agent_id of the run to inspect / wait on / cancel',
-	},
-
-	// ---- Wait-specific ----
-	{
-		displayName: 'Poll Interval (Ms)',
-		name: 'pollIntervalMs',
-		type: 'number',
-		default: 1000,
-		typeOptions: { minValue: 250, maxValue: 60000 },
-		displayOptions: { show: { resource: ['run'], operation: ['wait'] } },
-		description: 'How frequently to poll getAgent while waiting. Lower values yield faster detection at the cost of more HTTP calls.',
-	},
-	{
-		displayName: 'Timeout (Seconds)',
-		name: 'timeoutSec',
-		type: 'number',
-		default: 300,
-		typeOptions: { minValue: 5, maxValue: 86400 },
-		displayOptions: { show: { resource: ['run'], operation: ['wait'] } },
-		description: 'Maximum seconds to wait before giving up. Exceeding this throws a workflow error.',
+		displayOptions: { show: { resource: ['run'], operation: ['getStatus', 'cancel'] } },
+		description: 'The agent_id of the run to inspect / cancel',
 	},
 
 	// ---- Cancel reason ----

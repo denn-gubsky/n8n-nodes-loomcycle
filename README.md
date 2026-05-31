@@ -35,7 +35,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Eighteen nodes (11 action + 2 trigger + 5 cluster sub-nodes) plus one credential type.
+Fourteen nodes (11 action + 2 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -45,7 +45,7 @@ Eighteen nodes (11 action + 2 trigger + 5 cluster sub-nodes) plus one credential
 
 As of **2.0.0** the former single multi-resource umbrella node is split into **dedicated action nodes**, each with its own canvas icon (n8n renders one icon per node type — separate nodes are the only way to give each entity a distinct glyph). They all share one credential and one wire client; they are drag-and-drop separate in the node picker.
 
-- **LoomCycle Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
+- **LoomCycle Run** — `Spawn` / `Get Status` / `Cancel` / `List Agents` (to wait for completion, use the **Run Completed** trigger or n8n's own Wait node between Spawn and Get Status)
 - **LoomCycle Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD; per-tool credentials `userCredentials` map on Spawn require loomcycle ≥ v0.12.x)
 - **LoomCycle Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` (message-flow + runtime admin CRUD; yaml-declared channels remain immutable)
 - **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
@@ -61,16 +61,16 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 
 ### Trigger nodes
 
-- **LoomCycle: Run Completed** — fires when an agent run reaches a terminal state. SSE primary with polling fallback for proxy-hostile deployments. Honours `parentAgentId` + `debug` filters from the adapter.
-- **LoomCycle: Channel Message** — long-poll subscribe with two delivery modes: `auto-ack` (at-most-once) and `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
+Both triggers use n8n's **polling** framework (`poll()`), scheduled by n8n's Poll Times — no in-node timers (n8n Cloud forbids timer primitives in community nodes). Detection latency is the poll interval.
 
-### Cluster sub-nodes (plug into n8n's AI Agent)
+- **LoomCycle: Run Completed** — polls for agent runs that have reached a terminal state (completed / failed / cancelled), deduping via workflow static data. Filterable by status + `parentAgentId`.
+- **LoomCycle: Channel Message** — polls a channel each tick: `auto-ack` (at-most-once, `subscribeChannel` poll-once) or `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
 
-- **LoomCycle Chat Model** — plugs into the AI Agent's **Chat Model** slot. Routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`) instead of a direct provider SDK. Single credential covers all providers; loomcycle's resolver picks provider / model at request time; per-user quota tracking; single audit log. Supports tool calling (LangChain `bindTools` → gateway's provider-agnostic schema → substrate translates per-provider). **No agent loop** — this is the thin gateway shim, not the full runtime. Use **Sub-Agent Tool** below when you want the agent loop.
-- **LoomCycle Memory Tool** — exposes Memory CRUD (read + write) as a single discriminated tool the AI Agent can call. The agent can persist intermediate state between reasoning turns or across runs via `setEntry` / `deleteEntry`.
-- **LoomCycle Channel Tool** — Channel publish + peek as agent tools.
-- **LoomCycle Sub-Agent Tool** — delegates to a configured loomcycle agent (drains `runStreaming`); the agent receives the parent's tool-call prompt and returns its `finalText`.
-- **LoomCycle MCP Server Tool** — **strategic differentiator.** Drag onto a canvas → the substrate auto-registers the MCP server via `MCPServerDef` (idempotent ensure: `get` → `create` on `NotFoundError`) → returns a tool that spawns a loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. `cleanupOnEnd: false` default — registrations persist across executions for stable agentic teams.
+### Cluster sub-node (plugs into n8n's AI Agent)
+
+- **LoomCycle Chat Model** — plugs into the AI Agent's **Chat Model** slot. Routes the agent's LLM calls through loomcycle's gateway (`POST /v1/_llm/chat`) instead of a direct provider SDK. Single credential covers all providers; loomcycle's resolver picks provider / model at request time; per-user quota tracking; single audit log. Supports tool calling. Built on **`@n8n/ai-node-sdk`** (`BaseChatModel`) — langchain-free, so the package stays Cloud-verifiable. **No agent loop** — this is the thin gateway shim, not the full runtime; use the **LoomCycle Run** action node for the full loop.
+
+> **Removed in v3.0.0:** the langchain-based Memory / Channel / Sub-Agent / MCP Server **Tool** sub-nodes. n8n Cloud bans community nodes that depend on `@langchain/core`, and `@n8n/ai-node-sdk` has no tool-supply API yet. To give an AI Agent loomcycle capabilities, wire the **action nodes** (Run / Memory / Channel) as the Agent's tools, or call loomcycle via the **Chat Model**. The Tool sub-nodes will return if/when the SDK adds a tool path.
 
 ## Configure the credential
 
@@ -88,7 +88,7 @@ Click **Test** → expect a green checkmark when the deployment is reachable. Be
 
 ## Examples
 
-Six importable workflow JSONs in [`examples/`](examples/) cover the canonical patterns:
+Four importable workflow JSONs in [`examples/`](examples/) cover the canonical patterns:
 
 | # | File | Pattern |
 |---|---|---|
@@ -96,18 +96,20 @@ Six importable workflow JSONs in [`examples/`](examples/) cover the canonical pa
 | 02 | [`02-slack-loomcycle-slack.json`](examples/02-slack-loomcycle-slack.json) | Slack trigger → loomcycle agent → Slack reply |
 | 03 | [`03-daily-activity-report.json`](examples/03-daily-activity-report.json) | Cron → `listAgents` → JS aggregation → email |
 | 04 | [`04-n8n-as-loomcycle-tool.json`](examples/04-n8n-as-loomcycle-tool.json) | **Vector 2** — n8n workflow as MCP server consumed by loomcycle |
-| 05 | [`05-ai-agent-with-loomcycle-memory.json`](examples/05-ai-agent-with-loomcycle-memory.json) | n8n AI Agent + Memory + Sub-Agent cluster tools |
-| 06 | [`06-dynamic-mcp-provisioning.json`](examples/06-dynamic-mcp-provisioning.json) | **Crown jewel** — `LoomCycleMcpServerTool` auto-provisioning |
+
+*(The AI-Agent + cluster-tool examples were removed in v3.0.0 alongside the langchain Tool sub-nodes.)*
 
 Import via **Workflows → Import from File**, then attach your LoomCycle API credential. See [`examples/README.md`](examples/README.md) for per-example prerequisites + caveats.
 
 ## Provisioning MCP servers dynamically
 
-The `LoomCycleMcpServerTool` cluster sub-node is the package's signature feature. When the parent AI Agent invokes it:
+The **LoomCycle MCP Server** action node registers HTTP / Streamable-HTTP MCP servers in the substrate at workflow-design time (run it once, ahead of any Run nodes), so spawned agents can reference them as `mcp__<name>__*`:
 
-1. **On first run:** calls `mcpServerDef({op: 'get', name})` → on `NotFoundError`, calls `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. The substrate registers the MCP server; subsequent agent spawns can reference it as `mcp__<name>__*`.
-2. **On subsequent runs:** the `get` succeeds; `create` is skipped. Idempotent.
-3. **On invocation:** spawns the configured loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. The agent has access to the MCP server's tool surface for the duration of the run.
+1. **Register:** `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. For idempotent setup, run **Get** first and only **Register** on `NotFoundError`.
+2. **Manage:** Fork / Promote / Retire / Rediscover / Verify the registration as versioned MCPServerDefs.
+3. Spawn agents (via **LoomCycle Run**) with `allowed_tools: ['mcp__<name>__*']` to give them the MCP server's tool surface.
+
+> *(Through v2.x this was an auto-provisioning AI-Agent cluster tool. That tool was langchain-based and removed in v3.0.0; the same substrate capability is now driven explicitly via the MCP Server action node.)*
 
 ### The env-var mirror
 
@@ -117,13 +119,7 @@ The Headers field accepts **template strings** (not plaintext credentials):
 Authorization: Bearer ${LOOMCYCLE_SLACK_TOKEN}
 ```
 
-At request time, loomcycle substitutes `${LOOMCYCLE_*}` tokens from its own environment. **The operator must mirror the credential**: it lives in n8n (for n8n's own Slack credential, if any) AND in loomcycle's env (`LOOMCYCLE_SLACK_TOKEN=…`). Plaintext credentials never traverse the n8n → loomcycle wire.
-
-The cluster sub-node logs the detected env-var names so you can see them in n8n's execution log:
-
-```
-[LoomCycleMcpServerTool] MCP server slack-mcp registered. Required env vars on loomcycle: LOOMCYCLE_SLACK_TOKEN
-```
+At request time, loomcycle substitutes `${LOOMCYCLE_*}` tokens from its own environment. **The operator must mirror the credential**: it lives in n8n (for n8n's own use, if any) AND in loomcycle's env (`LOOMCYCLE_SLACK_TOKEN=…`). Plaintext credentials never traverse the n8n → loomcycle wire. The MCP Server node's UI renders a "Required env vars on loomcycle" notice listing the `${LOOMCYCLE_*}` tokens it detects in your headers.
 
 ## Local development install
 
@@ -141,7 +137,7 @@ npm link
 cd ~/.n8n/nodes
 npm link @loomcycle/n8n-nodes-loomcycle
 
-# Then restart n8n. The 7 nodes appear under the "LoomCycle" prefix in
+# Then restart n8n. The 14 nodes appear under the "LoomCycle" prefix in
 # the node picker.
 ```
 
@@ -155,9 +151,11 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Channel CRUD (publish / subscribe / peek / ack) | **v0.9.2** | PR #180 on the substrate |
 | AgentDef + SkillDef substrate-admin ops | v0.8.22 | PR #163 |
 | `content_sha256` Verify op | v0.9.x | PR #175 |
-| **MCPServerDef substrate** (dynamic MCP) | **v0.9.2** | PR #177; required by `LoomCycleMcpServerTool` |
-| `parentAgentId` filter + `debug` toggle on streams | v0.9.2 | PR #181 |
+| **MCPServerDef substrate** (dynamic MCP) | **v0.9.2** | PR #177; required by the **MCP Server** action node |
+| `parentAgentId` filter | v0.9.2 | used by the Run Completed trigger |
 | **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` | **v0.10.x** | enables n8n AI Agent's Chat Model slot to route through loomcycle |
+| Per-tool credentials (RFC F) + Schedule (RFC E) | **v0.12.x** | Schedule action node |
+| Inbound Webhooks (RFC H) + A2A (RFC G) | **v0.14.x** | Webhook + A2A Agent / A2A Server Card action nodes |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
@@ -168,9 +166,9 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 - **Tools Agent path:** requires n8n v1.82+ (cluster sub-nodes ship both `supplyData()` and `execute()` so they work across older modes too)
 - **Node.js:** ≥ 20.15
 
-### `@loomcycle/client` pin
+### `@loomcycle/client` (bundled, not a runtime dependency)
 
-This package pins `@loomcycle/client` to `^0.11.5`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.11.0 added `llmChat()` + `llmStream()` typed wrappers around the LLM Gateway endpoint (`POST /v1/_llm/chat`); v0.11.5 added Memory writes (`setMemoryEntry` / `deleteMemoryEntry`) + runtime Channel admin CRUD (`createChannel` / `updateChannel` / `deleteChannel`), both consumed by this package's 1.2.0 release.
+`@loomcycle/client` (`^0.14.1`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
 
 ### Verified deployments
 
@@ -180,11 +178,11 @@ The integration has been smoke-tested end-to-end against the following configura
 |---|---|
 | **Action node — `Run → Spawn`** | Picks an agent from the library dropdown (yaml-static + dynamic AgentDef entries, source-tagged), spawns via `runStreaming`, drains the final text + usage + stopReason into the workflow output |
 | **Action node — `Channel → List`** | Lists declared channels (read-only credential smoke test) |
-| **Trigger — `Run Completed` (SSE)** | Workflow published → SSE held open → loomcycle pushes terminal-state events; executions land within ~10-20 ms (real push, not poll) |
-| **Cluster sub-node — `Memory Tool` inside n8n AI Agent** | Anthropic Chat Model + LoomCycle Memory Tool wired to the AI Agent's Tool slot; LLM calls the tool (`op: listScopes`), receives `{scopes: [...]}`, writes a natural-language summary |
-| **Network path** | TrueNAS-hosted n8n Docker → direct IP to loomcycle (Tailscale MagicDNS bypassed) → sub-20 ms SSE round-trips, sub-second tool calls |
+| **Trigger — `Run Completed` (polling)** | Workflow active → n8n calls `poll()` on the Poll Times schedule → new terminal-state runs emit, deduped via workflow static data |
+| **Cluster sub-node — `Chat Model` inside n8n AI Agent** | LoomCycle Chat Model wired to the AI Agent's Chat Model slot; the agent's LLM calls route through loomcycle's gateway (provider routing + per-user quota + single audit log) |
+| **Network path** | TrueNAS-hosted n8n Docker → direct IP to loomcycle (Tailscale MagicDNS bypassed) → sub-second round-trips |
 
-For deployments behind reverse proxies / Cloudflare workers that strip long-lived connections, switch the `Run Completed` trigger's **Transport** parameter to `Polling` — same data, slower latency, no SSE dependency.
+> **v3.0.0 note:** triggers moved from SSE-push to n8n's polling framework (n8n Cloud bans in-node timers), so detection latency is the configured poll interval rather than near-instant.
 
 ## Troubleshooting
 
@@ -206,17 +204,17 @@ The channel must exist in loomcycle's `channels:` yaml block before the publish 
 
 You're on a loomcycle older than v0.9.2 (PR #177). Upgrade the substrate.
 
-### SSE trigger stops firing after ~30 minutes
+### Run Completed / Channel Message trigger isn't firing
 
-This is the substrate's server-side stream cap. The trigger reconnects transparently — check the n8n execution log; you should see emit events resume within seconds. If your reverse proxy / Cloudflare drops long-lived connections, switch the trigger's `Transport` parameter to **Polling**.
+Both are **polling** triggers — they only fire when the workflow is **Active** (production), on the schedule set by the node's **Poll Times**. In the editor, use *Fetch Test Event* to run one `poll()` manually. Detection latency is the poll interval (there's no SSE push as of v3.0.0).
 
-### `LoomCycleMcpServerTool` says "Required env vars on loomcycle: …"
+### MCP Server node says "Required env vars on loomcycle: …"
 
-That's the env-var-mirror hint, not an error. Set the listed env vars on the loomcycle deployment (not on n8n). Restart loomcycle so they're in scope. The MCP server will then authenticate when the agent invokes it.
+That's the env-var-mirror hint, not an error. Set the listed env vars on the loomcycle deployment (not on n8n). Restart loomcycle so they're in scope. The MCP server will then authenticate when an agent invokes it.
 
-### Cluster sub-nodes (`LoomCycle * Tool`) don't appear in n8n's AI Agent picker
+### `LoomCycle Chat Model` doesn't appear in n8n's AI Agent picker
 
-n8n's cluster-node API stabilised at `1.82.0`. Older n8n versions won't show the sub-nodes. Upgrade n8n.
+n8n's cluster-node API stabilised at `1.82.0`. Older n8n versions won't show the Chat Model sub-node. Upgrade n8n.
 
 ## Filing issues / contributing
 

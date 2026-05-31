@@ -1,110 +1,73 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { pollOnce } from '../../../nodes/LoomCycleRunCompleted/helpers/poll';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { INodeExecutionData, IPollFunctions } from 'n8n-workflow';
 
-function makeCtx() {
-	const staticData: Record<string, unknown> = {};
+const { mockClient } = vi.hoisted(() => ({
+	mockClient: { listUserAgents: vi.fn() },
+}));
+
+vi.mock('@loomcycle/client', async (importActual) => {
+	const actual = await importActual<typeof import('@loomcycle/client')>();
+	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
+});
+
+import { LoomCycleRunCompleted } from '../../../nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node';
+
+function pollCtx(params: Record<string, unknown>, staticData: Record<string, unknown> = {}): IPollFunctions {
 	return {
-		emit: vi.fn(),
-		emitError: vi.fn(),
-		helpers: { returnJsonArray: (items: unknown[]) => items },
-		getNode: () => ({ name: 'LoomCycle Test', type: 'loomCycleRunCompleted' }),
-		getWorkflowStaticData: (_kind: string) => staticData,
-	};
+		getNodeParameter: (name: string, fallback?: unknown) => (name in params ? params[name] : fallback),
+		getCredentials: async () => ({ baseUrl: 'http://127.0.0.1:8787', bearerToken: 't', userId: '', userTier: '', mcpUrl: '' }),
+		getNode: () => ({ id: 't', name: 'RC', type: 'x', typeVersion: 1, position: [0, 0], parameters: {} }),
+		getWorkflowStaticData: () => staticData,
+	} as unknown as IPollFunctions;
 }
 
-type LoopThis = Parameters<typeof Function.prototype.call>[0];
+function poll(node: LoomCycleRunCompleted, ctx: IPollFunctions) {
+	return (node.poll as unknown as (this: IPollFunctions) => Promise<INodeExecutionData[][] | null>).call(ctx);
+}
 
-describe('pollOnce', () => {
-	let ctx: ReturnType<typeof makeCtx>;
-	beforeEach(() => {
-		ctx = makeCtx();
+beforeEach(() => mockClient.listUserAgents.mockReset());
+
+describe('LoomCycle: Run Completed — poll()', () => {
+	it('emits fresh runs whose status matches the selected terminal statuses', async () => {
+		mockClient.listUserAgents.mockResolvedValue([
+			{ agent_id: 'a1', status: 'completed' },
+			{ agent_id: 'a2', status: 'running' },
+			{ agent_id: 'a3', status: 'failed' },
+		]);
+		const res = await poll(new LoomCycleRunCompleted(), pollCtx({ userId: 'u1', statuses: ['completed', 'failed'], additionalFields: {} }));
+		expect(res).not.toBeNull();
+		expect(res![0].map((i) => (i.json as { agent_id: string }).agent_id)).toEqual(['a1', 'a3']);
 	});
 
-	it('calls listUserAgents once per requested status', async () => {
-		const listUserAgents = vi.fn().mockResolvedValue([]);
-		await pollOnce.call(ctx as unknown as LoopThis, {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: ['completed', 'failed'],
-			intervalMs: 0,
-			signal: new AbortController().signal,
-		});
-		expect(listUserAgents).toHaveBeenCalledTimes(2);
+	it('dedups across polls — returns null when nothing new', async () => {
+		mockClient.listUserAgents.mockResolvedValue([{ agent_id: 'a1', status: 'completed' }]);
+		const sd = {};
+		const ctx = pollCtx({ userId: 'u1', statuses: ['completed'], additionalFields: {} }, sd);
+		const node = new LoomCycleRunCompleted();
+		const first = await poll(node, ctx);
+		expect(first![0]).toHaveLength(1);
+		const second = await poll(node, ctx);
+		expect(second).toBeNull();
 	});
 
-	it('falls back to all 3 terminal statuses when statuses is empty', async () => {
-		const listUserAgents = vi.fn().mockResolvedValue([]);
-		await pollOnce.call(ctx as unknown as LoopThis, {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: [],
-			intervalMs: 0,
-			signal: new AbortController().signal,
-		});
-		expect(listUserAgents).toHaveBeenCalledTimes(3);
+	it('filters by parentAgentId', async () => {
+		mockClient.listUserAgents.mockResolvedValue([
+			{ agent_id: 'a1', status: 'completed', parent_agent_id: 'p1' },
+			{ agent_id: 'a2', status: 'completed', parent_agent_id: 'p2' },
+		]);
+		const res = await poll(new LoomCycleRunCompleted(), pollCtx({ userId: 'u1', statuses: ['completed'], additionalFields: { parentAgentId: 'p1' } }));
+		expect(res![0].map((i) => (i.json as { agent_id: string }).agent_id)).toEqual(['a1']);
 	});
 
-	it('emits new rows + dedups across invocations', async () => {
-		const listUserAgents = vi
-			.fn()
-			.mockResolvedValueOnce([{ agent_id: 'a1', status: 'completed' }])
-			.mockResolvedValueOnce([
-				{ agent_id: 'a1', status: 'completed' }, // dedup'd
-				{ agent_id: 'a2', status: 'completed' },
-			]);
-		const signal = new AbortController().signal;
-		const opts = {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: ['completed'] as const,
-			intervalMs: 0,
-			signal,
-		};
-
-		await pollOnce.call(ctx as unknown as LoopThis, { ...opts, statuses: ['completed'] });
-		expect(ctx.emit).toHaveBeenCalledTimes(1);
-		expect((ctx.emit.mock.calls[0][0] as unknown[][])[0]).toHaveLength(1);
-
-		await pollOnce.call(ctx as unknown as LoopThis, { ...opts, statuses: ['completed'] });
-		expect(ctx.emit).toHaveBeenCalledTimes(2);
-		expect((ctx.emit.mock.calls[1][0] as unknown[][])[0]).toHaveLength(1);
-	});
-
-	it('forwards parentAgentId to listUserAgents opts', async () => {
-		const listUserAgents = vi.fn().mockResolvedValue([]);
-		await pollOnce.call(ctx as unknown as LoopThis, {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: ['completed'],
-			parentAgentId: 'parent-xyz',
-			intervalMs: 0,
-			signal: new AbortController().signal,
-		});
-		const opts = listUserAgents.mock.calls[0][1] as { parentAgentId?: string };
-		expect(opts.parentAgentId).toBe('parent-xyz');
-	});
-
-	it('does not emit when no fresh rows', async () => {
-		const listUserAgents = vi.fn().mockResolvedValue([]);
-		await pollOnce.call(ctx as unknown as LoopThis, {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: ['completed'],
-			intervalMs: 0,
-			signal: new AbortController().signal,
-		});
-		expect(ctx.emit).not.toHaveBeenCalled();
-	});
-
-	it('skips rows without agent_id (substrate edge case)', async () => {
-		const listUserAgents = vi.fn().mockResolvedValue([{ status: 'completed' }, { agent_id: '', status: 'completed' }]);
-		await pollOnce.call(ctx as unknown as LoopThis, {
-			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
-			userId: 'u1',
-			statuses: ['completed'],
-			intervalMs: 0,
-			signal: new AbortController().signal,
-		});
-		expect(ctx.emit).not.toHaveBeenCalled();
+	it('falls through to credential default userId', async () => {
+		mockClient.listUserAgents.mockResolvedValue([]);
+		const ctx = {
+			getNodeParameter: (n: string) => (n === 'statuses' ? ['completed'] : n === 'additionalFields' ? {} : ''),
+			getCredentials: async () => ({ baseUrl: 'http://x', bearerToken: 't', userId: 'cred-u', userTier: '', mcpUrl: '' }),
+			getNode: () => ({ id: 't', name: 'RC', type: 'x', typeVersion: 1, position: [0, 0], parameters: {} }),
+			getWorkflowStaticData: () => ({}),
+		} as unknown as IPollFunctions;
+		await poll(new LoomCycleRunCompleted(), ctx);
+		expect(mockClient.listUserAgents).toHaveBeenCalledWith('cred-u');
 	});
 });

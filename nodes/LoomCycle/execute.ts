@@ -148,27 +148,6 @@ async function executeRun(
 		return agent as unknown as IDataObject;
 	}
 
-	if (operation === 'wait') {
-		const agentId = ctx.getNodeParameter('agentId', i) as string;
-		const pollIntervalMs = ctx.getNodeParameter('pollIntervalMs', i, 1000) as number;
-		const timeoutSec = ctx.getNodeParameter('timeoutSec', i, 300) as number;
-		const deadline = Date.now() + timeoutSec * 1000;
-
-		while (true) {
-			const agent = await client.getAgent(agentId);
-			if (agent.status !== 'running') {
-				return agent as unknown as IDataObject;
-			}
-			if (Date.now() >= deadline) {
-				throw new NodeOperationError(
-					ctx.getNode(),
-					`Timed out after ${timeoutSec}s waiting for agent ${agentId} to finish (current status: ${agent.status}).`,
-				);
-			}
-			await sleep(pollIntervalMs);
-		}
-	}
-
 	if (operation === 'cancel') {
 		const agentId = ctx.getNodeParameter('agentId', i) as string;
 		const reason = ctx.getNodeParameter('reason', i, '') as string;
@@ -764,6 +743,3 @@ function parseJsonField(
 	}
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}

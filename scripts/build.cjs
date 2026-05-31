@@ -43,8 +43,10 @@ esbuild
 		platform: 'node',
 		target: 'node20',
 		format: 'cjs',
-		// n8n-host-provided peers — never bundle these.
-		external: ['n8n-workflow', 'zod', '@langchain/*'],
+		// n8n-host-provided peers — never bundle these. @n8n/ai-node-sdk is
+		// the sanctioned AI SDK (the Chat Model node builds on it); n8n
+		// supplies it at runtime. node: builtins are external automatically.
+		external: ['n8n-workflow', '@n8n/ai-node-sdk'],
 		// @loomcycle/client is intentionally NOT external → inlined.
 		sourcemap: false,
 		logLevel: 'info',

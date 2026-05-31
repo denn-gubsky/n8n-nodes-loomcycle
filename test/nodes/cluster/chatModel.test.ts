@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { HumanMessage, SystemMessage, ToolMessage, AIMessage } from '@langchain/core/messages';
+import type { Message, Tool } from '@n8n/ai-node-sdk';
 
 const { mockClient } = vi.hoisted(() => ({
 	mockClient: {
 		llmChat: vi.fn(),
-		llmStream: vi.fn(),
 	},
 }));
 
@@ -14,347 +13,124 @@ vi.mock('@loomcycle/client', async (importActual) => {
 });
 
 import { LoomCycleChatModel } from '../../../nodes/LoomCycleChatModel/LoomCycleChatModel.node';
-import {
-	LoomcycleChatModel,
-	__langchainToLoomcycleMessageForTests as langchainToLoomcycleMessage,
-	__generateToolCallIdForTests as generateToolCallId,
-	__ensureNonEmptyToolCallIdForTests as ensureNonEmptyToolCallId,
-} from '../../../nodes/_shared/langchainChatModel';
+import { LoomcycleChatModel } from '../../../nodes/_shared/loomcycleChatModel';
 import { makeSupplyDataContext, invokeSupplyData } from './_helpers';
 
+// Minimal loomcycle llmChat response factory.
+function chatResp(over: Partial<Record<string, unknown>> = {}) {
+	return {
+		id: 'llm_abc',
+		request_id: 'req_abc',
+		provider: 'anthropic',
+		model: 'claude-sonnet-4-6',
+		content: [{ type: 'text', text: 'Hello' }],
+		stop_reason: 'end_turn',
+		usage: { input_tokens: 10, output_tokens: 5 },
+		...over,
+	};
+}
+
 beforeEach(() => {
-	Object.values(mockClient).forEach((fn) => fn.mockReset());
+	mockClient.llmChat.mockReset();
 });
 
-describe('LoomCycleChatModel — n8n cluster sub-node', () => {
-	it('supplyData returns a LoomcycleChatModel instance', async () => {
-		const node = new LoomCycleChatModel();
-		const ctx = makeSupplyDataContext({
-			params: { provider: 'anthropic', model: 'claude-sonnet-4-6', maxTokens: 4096, temperature: -1, streaming: true },
-		});
-		const result = await invokeSupplyData(node, ctx);
-		expect(result.response).toBeInstanceOf(LoomcycleChatModel);
-	});
-
-	it('supplyData honours node-level overrides + falls through to credential defaults', async () => {
-		const node = new LoomCycleChatModel();
-		const ctx = makeSupplyDataContext({
-			params: { provider: '', model: '', tier: 'pro', maxTokens: 2048, temperature: -1, streaming: true },
-			credentials: { userId: 'cred-default-user', userTier: 'cred-default-tier' },
-		});
-		const result = await invokeSupplyData(node, ctx);
-		const model = result.response as LoomcycleChatModel;
-		// Internal state isn't exposed publicly, but the model should
-		// construct without throwing and route the credential defaults
-		// when no per-node override is set. End-to-end assertions on
-		// llmChat call below verify the routing.
-		expect(model).toBeInstanceOf(LoomcycleChatModel);
-	});
-});
-
-describe('LoomcycleChatModel — LangChain wrapper around the LLM gateway', () => {
-	function buildModel(overrides: Partial<ConstructorParameters<typeof LoomcycleChatModel>[0]> = {}) {
-		return new LoomcycleChatModel({
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			client: mockClient as any,
-			...overrides,
-		});
+describe('LoomcycleChatModel — @n8n/ai-node-sdk model over the LLM gateway', () => {
+	function model(fields: Record<string, unknown> = {}) {
+		return new LoomcycleChatModel({ client: mockClient as never, ...fields });
 	}
 
-	function asAsyncIterable<T>(items: T[]): AsyncIterable<T> {
-		return {
-			async *[Symbol.asyncIterator]() {
-				for (const item of items) yield item;
-			},
-		};
-	}
-
-	it('_generate maps text response to AIMessage + tokenUsage', async () => {
-		mockClient.llmChat.mockResolvedValue({
-			id: 'llm_01',
-			request_id: 'req_01',
-			provider: 'anthropic',
-			model: 'claude-sonnet-4-6',
-			content: [{ type: 'text', text: 'Hello!' }],
-			stop_reason: 'end_turn',
-			usage: { input_tokens: 100, output_tokens: 20 },
-		});
-
-		const model = buildModel({ maxTokens: 1024 });
-		const result = await model.invoke([new HumanMessage('Hi')]);
-
-		expect(mockClient.llmChat).toHaveBeenCalledOnce();
-		const callOpts = mockClient.llmChat.mock.calls[0][0];
-		expect(callOpts.messages).toEqual([{ role: 'user', content: 'Hi' }]);
-		expect(callOpts.max_tokens).toBe(1024);
-
-		expect(result.content).toBe('Hello!');
-		expect((result as AIMessage).usage_metadata).toMatchObject({
-			input_tokens: 100,
-			output_tokens: 20,
-			total_tokens: 120,
-		});
-	});
-
-	it('_generate maps tool_use content blocks into AIMessage.tool_calls', async () => {
-		mockClient.llmChat.mockResolvedValue({
-			id: 'llm_02',
-			request_id: 'req_02',
-			provider: 'anthropic',
-			model: 'claude-sonnet-4-6',
-			content: [
-				{ type: 'text', text: 'Let me check.' },
-				{ type: 'tool_use', id: 'call_abc', name: 'calculator', input: { expr: '2+2' } },
-			],
-			stop_reason: 'tool_use',
-			usage: { input_tokens: 50, output_tokens: 30 },
-		});
-
-		const model = buildModel();
-		const result = (await model.invoke([new HumanMessage("What's 2+2?")])) as AIMessage;
-
-		expect(result.content).toBe('Let me check.');
-		expect(result.tool_calls).toEqual([
-			{ id: 'call_abc', name: 'calculator', args: { expr: '2+2' } },
-		]);
-	});
-
-	it('maps the canonical four message types (system / human / ai / tool) to gateway shape', async () => {
-		mockClient.llmChat.mockResolvedValue({
-			id: 'llm_03',
-			request_id: 'req_03',
-			provider: 'anthropic',
-			model: 'claude-sonnet-4-6',
-			content: [{ type: 'text', text: 'Got it.' }],
-			stop_reason: 'end_turn',
-			usage: { input_tokens: 1, output_tokens: 1 },
-		});
-
-		const model = buildModel();
-		await model.invoke([
-			new SystemMessage('You are helpful.'),
-			new HumanMessage('Hi'),
-			new AIMessage({
-				content: '',
-				tool_calls: [{ id: 'c1', name: 'calc', args: { x: 1 } }],
-			}),
-			new ToolMessage({ content: '42', tool_call_id: 'c1' }),
-		]);
-
-		const sent = mockClient.llmChat.mock.calls[0][0].messages;
-		expect(sent).toEqual([
-			{ role: 'system', content: 'You are helpful.' },
-			{ role: 'user', content: 'Hi' },
-			{ role: 'assistant', content: '', tool_calls: [{ id: 'c1', name: 'calc', input: { x: 1 } }] },
-			{ role: 'tool', content: '42', tool_call_id: 'c1' },
-		]);
-	});
-
-	it('forwards provider / model / tier / userId / userTier routing hints', async () => {
-		mockClient.llmChat.mockResolvedValue({
-			id: 'llm_04',
-			request_id: 'req_04',
-			provider: 'deepseek',
-			model: 'deepseek-v4-pro',
-			content: [{ type: 'text', text: 'ok' }],
-			stop_reason: 'end_turn',
-			usage: { input_tokens: 1, output_tokens: 1 },
-		});
-
-		const model = buildModel({
-			provider: 'deepseek',
-			model: 'deepseek-v4-pro',
-			tier: 'pro',
-			userId: 'u-1',
-			userTier: 'pro',
-			temperature: 0.7,
-		});
-		await model.invoke([new HumanMessage('hi')]);
-
+	it('generate maps system/user messages to llmChat content + forwards routing', async () => {
+		mockClient.llmChat.mockResolvedValue(chatResp());
+		const m = model({ provider: 'anthropic', model: 'claude-sonnet-4-6', tier: 'pro', userId: 'u1', userTier: 'high', maxTokens: 2048, temperature: 0.4 });
+		const messages: Message[] = [
+			{ role: 'system', content: [{ type: 'text', text: 'be brief' }] },
+			{ role: 'user', content: [{ type: 'text', text: 'hi there' }] },
+		];
+		await m.generate(messages);
 		const opts = mockClient.llmChat.mock.calls[0][0];
-		expect(opts.provider).toBe('deepseek');
-		expect(opts.model).toBe('deepseek-v4-pro');
-		expect(opts.tier).toBe('pro');
-		expect(opts.user_id).toBe('u-1');
-		expect(opts.user_tier).toBe('pro');
-		expect(opts.temperature).toBe(0.7);
-	});
-
-	it('streaming: yields ChatGenerationChunk per text_delta + final usage chunk on done', async () => {
-		mockClient.llmStream.mockReturnValue(
-			asAsyncIterable([
-				{ kind: 'provider_chosen', payload: { provider: 'anthropic', model: 'claude-sonnet-4-6', request_id: 'req_05' } },
-				{ kind: 'content_block_start', payload: { index: 0, block: { type: 'text', text: '' } } },
-				{ kind: 'content_block_delta', payload: { index: 0, delta: { type: 'text_delta', text: 'Hello' } } },
-				{ kind: 'content_block_delta', payload: { index: 0, delta: { type: 'text_delta', text: ' world' } } },
-				{ kind: 'content_block_stop', payload: { index: 0 } },
-				{ kind: 'message_delta', payload: { delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 10, output_tokens: 2 } } },
-				{ kind: 'done', payload: { id: 'llm_05', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 2 } } },
-			]),
-		);
-
-		const model = buildModel({ streaming: true });
-		const chunks: string[] = [];
-		let lastUsage: unknown = null;
-		for await (const chunk of await model.stream([new HumanMessage('hi')])) {
-			if (chunk.content) chunks.push(chunk.content as string);
-			const meta = (chunk as { usage_metadata?: unknown }).usage_metadata;
-			if (meta) lastUsage = meta;
-		}
-
-		expect(chunks).toContain('Hello');
-		expect(chunks).toContain(' world');
-		expect(lastUsage).toMatchObject({ input_tokens: 10, output_tokens: 2, total_tokens: 12 });
-	});
-
-	it('streaming: consolidates input_json_delta fragments into one tool_call_chunk on content_block_stop', async () => {
-		mockClient.llmStream.mockReturnValue(
-			asAsyncIterable([
-				{ kind: 'content_block_start', payload: { index: 0, block: { type: 'tool_use', id: 'call_x', name: 'calc', input: {} } } },
-				{ kind: 'content_block_delta', payload: { index: 0, delta: { type: 'input_json_delta', partial_json: '{"expr":' } } },
-				{ kind: 'content_block_delta', payload: { index: 0, delta: { type: 'input_json_delta', partial_json: '"2+2"}' } } },
-				{ kind: 'content_block_stop', payload: { index: 0 } },
-				{ kind: 'done', payload: { id: 'llm_06', stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 3 } } },
-			]),
-		);
-
-		const model = buildModel({ streaming: true });
-		const toolCalls: Array<{ name: string; args: unknown }> = [];
-		for await (const chunk of await model.stream([new HumanMessage("What's 2+2?")])) {
-			// AIMessageChunk has tool_call_chunks on streamed tool calls
-			const msg = chunk as { tool_call_chunks?: Array<{ name: string; args: string }> };
-			if (msg.tool_call_chunks) {
-				for (const tc of msg.tool_call_chunks) {
-					toolCalls.push({ name: tc.name, args: JSON.parse(tc.args) });
-				}
-			}
-		}
-		expect(toolCalls).toEqual([{ name: 'calc', args: { expr: '2+2' } }]);
-	});
-
-	it('bindTools is defined so n8n Tools Agent recognises tool-calling support', async () => {
-		const model = buildModel();
-		// n8n's check is essentially `typeof model.bindTools === 'function'`.
-		expect(typeof model.bindTools).toBe('function');
-	});
-
-	it('bindTools forwards tools through this.bind so they land on options.tools at call time', async () => {
-		mockClient.llmChat.mockResolvedValue({
-			id: 'llm_07',
-			request_id: 'req_07',
-			provider: 'anthropic',
-			model: 'claude-sonnet-4-6',
-			content: [{ type: 'text', text: 'ok' }],
-			stop_reason: 'end_turn',
-			usage: { input_tokens: 1, output_tokens: 1 },
-		});
-		const model = buildModel();
-		// Pre-bind tools via the LangChain pattern; the returned Runnable
-		// should propagate the tools through to llmChat.
-		const bound = model.bindTools([
-			{
-				name: 'calc',
-				description: 'evaluate math',
-				input_schema: { type: 'object', properties: { expr: { type: 'string' } } },
-			},
+		expect(opts.messages).toEqual([
+			{ role: 'system', content: 'be brief' },
+			{ role: 'user', content: 'hi there' },
 		]);
-		await bound.invoke([new HumanMessage('compute 2+2')]);
-		const opts = mockClient.llmChat.mock.calls[0][0];
-		expect(opts.tools).toEqual([
-			{
-				name: 'calc',
-				description: 'evaluate math',
-				input_schema: { type: 'object', properties: { expr: { type: 'string' } } },
-			},
-		]);
+		expect(opts).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-4-6', tier: 'pro', user_id: 'u1', user_tier: 'high', max_tokens: 2048, temperature: 0.4 });
 	});
 
-	// ---- Direct conversion tests (bypass LangChain's input coercion) ----
-	// These exercise langchainToLoomcycleMessage directly so we can cover
-	// the IPC-degraded shapes that LangChain's invoke() would reject
-	// upstream of our code.
-
-	describe('langchainToLoomcycleMessage — robust to broken prototype chains', () => {
-		it('routes a ToolMessage with intact _getType() correctly', () => {
-			const msg = new ToolMessage({ content: '42', tool_call_id: 'call_xyz' });
-			const out = langchainToLoomcycleMessage(msg);
-			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
-		});
-
-		it('routes a plain object via _getType() when instanceof fails', () => {
-			// Simulate n8n worker-thread reconstruction: _getType still
-			// works (it's on the prototype LangChain rehydrates) but
-			// `instanceof ToolMessage` returns false.
-			const fakeMsg = {
-				content: '42',
-				tool_call_id: 'call_xyz',
-				_getType: () => 'tool',
-			} as unknown as ToolMessage;
-			const out = langchainToLoomcycleMessage(fakeMsg);
-			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
-		});
-
-		it('routes a tool-shaped plain object via shape inspection when _getType is missing entirely', () => {
-			// Worst case: prototype chain completely lost (no _getType
-			// method, no class identity). We fall back to detecting the
-			// tool_call_id field as the signal.
-			const fakeMsg = {
-				content: '42',
-				tool_call_id: 'call_xyz',
-			} as unknown as ToolMessage;
-			const out = langchainToLoomcycleMessage(fakeMsg);
-			expect(out).toEqual({ role: 'tool', content: '42', tool_call_id: 'call_xyz' });
-		});
-
-		it('preserves AIMessage tool_calls round-trip via shape inspection', () => {
-			const fakeMsg = {
-				content: '',
-				tool_calls: [{ id: 'c1', name: 'calc', args: { x: 1 } }],
-			} as unknown as AIMessage;
-			const out = langchainToLoomcycleMessage(fakeMsg);
-			expect(out).toMatchObject({
+	it('generate maps assistant tool-call + tool-result messages to the gateway shape', async () => {
+		mockClient.llmChat.mockResolvedValue(chatResp());
+		const m = model();
+		const messages: Message[] = [
+			{
 				role: 'assistant',
-				tool_calls: [{ id: 'c1', name: 'calc', input: { x: 1 } }],
-			});
+				content: [
+					{ type: 'text', text: 'calling' },
+					{ type: 'tool-call', toolCallId: 'call_1', toolName: 'getMemory', input: '{"key":"x"}' },
+				],
+			},
+			{
+				role: 'tool',
+				content: [{ type: 'tool-result', toolCallId: 'call_1', result: { value: 42 } }],
+			},
+		];
+		await m.generate(messages);
+		const opts = mockClient.llmChat.mock.calls[0][0];
+		expect(opts.messages[0]).toEqual({
+			role: 'assistant',
+			content: 'calling',
+			tool_calls: [{ id: 'call_1', name: 'getMemory', input: { key: 'x' } }],
 		});
-
-		it('substitutes a synthetic tool_call_id when ToolMessage has empty id (defensive)', () => {
-			const fakeMsg = {
-				content: '42',
-				tool_call_id: '',
-				_getType: () => 'tool',
-			} as unknown as ToolMessage;
-			const out = langchainToLoomcycleMessage(fakeMsg);
-			expect(out.role).toBe('tool');
-			expect(out.content).toBe('42');
-			// tool_call_id is non-empty (synthetic), starts with 'tool_'
-			expect(out.tool_call_id).toMatch(/^tool_[a-z0-9]{6,}$/);
-		});
+		expect(opts.messages[1]).toEqual({ role: 'tool', content: '{"value":42}', tool_call_id: 'call_1' });
 	});
 
-	describe('Tool-call id helpers', () => {
-		it('generateToolCallId returns non-empty short identifier', () => {
-			const id = generateToolCallId();
-			expect(id).toMatch(/^tool_[a-z0-9]{6,}$/);
-			expect(id.length).toBeGreaterThanOrEqual(11);
-		});
-
-		it('ensureNonEmptyToolCallId passes through non-empty input', () => {
-			expect(ensureNonEmptyToolCallId('call_abc')).toBe('call_abc');
-		});
-
-		it('ensureNonEmptyToolCallId generates synthetic id when input is undefined / empty', () => {
-			expect(ensureNonEmptyToolCallId(undefined)).toMatch(/^tool_[a-z0-9]+$/);
-			expect(ensureNonEmptyToolCallId('')).toMatch(/^tool_[a-z0-9]+$/);
-		});
-	});
-
-	it('SECURITY — bearer fragments in error messages are redacted before reaching the caller', async () => {
-		mockClient.llmChat.mockRejectedValue(
-			new Error('Authorization: Bearer sk-leaked-fake-token-xyz123 was rejected'),
+	it('generate maps the gateway response (text + tool_use) to a GenerateResult', async () => {
+		mockClient.llmChat.mockResolvedValue(
+			chatResp({
+				content: [
+					{ type: 'text', text: 'sure' },
+					{ type: 'tool_use', id: 'tu_1', name: 'doThing', input: { a: 1 } },
+				],
+				stop_reason: 'tool_use',
+				usage: { input_tokens: 7, output_tokens: 3 },
+			}),
 		);
-		const model = buildModel();
-		await expect(model.invoke([new HumanMessage('hi')])).rejects.toThrow(/\[REDACTED\]/);
-		await expect(model.invoke([new HumanMessage('hi')])).rejects.not.toThrow(/sk-leaked-fake-token-xyz123/);
+		const res = await model().generate([{ role: 'user', content: [{ type: 'text', text: 'go' }] }]);
+		expect(res.message.role).toBe('assistant');
+		expect(res.message.content).toEqual([
+			{ type: 'text', text: 'sure' },
+			{ type: 'tool-call', toolCallId: 'tu_1', toolName: 'doThing', input: '{"a":1}' },
+		]);
+		expect(res.finishReason).toBe('tool-calls');
+		expect(res.usage).toEqual({ promptTokens: 7, completionTokens: 3, totalTokens: 10 });
+	});
+
+	it('withTools forwards function tools as gateway LLMTools (JSON schema)', async () => {
+		mockClient.llmChat.mockResolvedValue(chatResp());
+		const tools: Tool[] = [
+			{ type: 'function', name: 'lookup', description: 'look it up', inputSchema: { type: 'object', properties: { q: { type: 'string' } } } },
+		];
+		await model().withTools(tools).generate([{ role: 'user', content: [{ type: 'text', text: 'q' }] }]);
+		const opts = mockClient.llmChat.mock.calls[0][0];
+		expect(opts.tools).toHaveLength(1);
+		expect(opts.tools[0]).toMatchObject({ name: 'lookup', description: 'look it up' });
+		expect(opts.tools[0].input_schema).toMatchObject({ type: 'object' });
+	});
+
+	it('redacts bearer fragments from gateway errors', async () => {
+		mockClient.llmChat.mockRejectedValue(new Error('failed: Authorization: Bearer sk-leaked-123'));
+		await expect(model().generate([{ role: 'user', content: [{ type: 'text', text: 'x' }] }])).rejects.toThrow(
+			/\[REDACTED\]/,
+		);
+	});
+});
+
+describe('LoomCycleChatModel — n8n Chat Model sub-node', () => {
+	it('supplyData builds without throwing and returns a response', async () => {
+		mockClient.llmChat.mockResolvedValue(chatResp());
+		const node = new LoomCycleChatModel();
+		const ctx = makeSupplyDataContext({
+			params: { provider: 'anthropic', model: 'claude-sonnet-4-6', maxTokens: 4096, temperature: -1 },
+		});
+		const result = await invokeSupplyData(node, ctx);
+		expect(result).toBeDefined();
+		expect(result.response).toBeDefined();
 	});
 });

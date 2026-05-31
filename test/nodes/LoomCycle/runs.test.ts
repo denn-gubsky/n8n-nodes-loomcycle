@@ -188,42 +188,6 @@ describe('LoomCycle resource=run', () => {
 		});
 	});
 
-	describe('Wait', () => {
-		it('returns the Agent when status flips to completed', async () => {
-			mockClient.getAgent
-				.mockResolvedValueOnce({ agent_id: 'a1', status: 'running' })
-				.mockResolvedValueOnce({ agent_id: 'a1', status: 'completed' });
-			const node = new LoomCycle();
-			const ctx = makeExecuteContext({
-				params: {
-					resource: 'run',
-					operation: 'wait',
-					agentId: 'a1',
-					pollIntervalMs: 5,
-					timeoutSec: 5,
-				},
-			});
-			const result = await node.execute.call(ctx);
-			expect(mockClient.getAgent).toHaveBeenCalledTimes(2);
-			expect((result[0][0].json as Record<string, unknown>).status).toBe('completed');
-		});
-
-		it('throws NodeOperationError when timeout exceeded', async () => {
-			mockClient.getAgent.mockResolvedValue({ agent_id: 'a1', status: 'running' });
-			const node = new LoomCycle();
-			const ctx = makeExecuteContext({
-				params: {
-					resource: 'run',
-					operation: 'wait',
-					agentId: 'a1',
-					pollIntervalMs: 5,
-					timeoutSec: 0,
-				},
-			});
-			await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
-		});
-	});
-
 	describe('Cancel', () => {
 		it('passes the reason through to cancelAgent', async () => {
 			mockClient.cancelAgent.mockResolvedValue({ cancelledCount: 2 });

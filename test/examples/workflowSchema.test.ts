@@ -82,8 +82,8 @@ function declaredLoomcycleNodeTypes(): Set<string> {
 describe('examples/ — every workflow JSON', () => {
 	const files = listExampleFiles();
 
-	it('produces exactly 6 example workflows', () => {
-		expect(files).toHaveLength(6);
+	it('produces exactly 4 example workflows', () => {
+		expect(files).toHaveLength(4);
 	});
 
 	for (const file of files) {
