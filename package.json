@@ -1,6 +1,6 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "2.1.1",
+	"version": "2.1.2",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -17,7 +17,8 @@
 	"license": "MIT",
 	"homepage": "https://github.com/denn-gubsky/n8n-nodes-loomcycle#readme",
 	"author": {
-		"name": "Dennis Gubsky"
+		"name": "Dennis Gubsky",
+		"email": "dennis@denn-gubsky.com"
 	},
 	"repository": {
 		"type": "git",
