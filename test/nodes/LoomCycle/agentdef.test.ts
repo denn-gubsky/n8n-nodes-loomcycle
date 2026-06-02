@@ -165,6 +165,92 @@ describe('LoomCycle resource=agentDef', () => {
 		});
 	});
 
+	it('Create folds agentProvider into overlay.provider (code-js, empty overlay)', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_js' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'nightly-report',
+				agentProvider: 'code-js',
+				overlay: '{}',
+				promote: true,
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.agentDef).toHaveBeenCalledWith({
+			op: 'create',
+			name: 'nightly-report',
+			overlay: { provider: 'code-js' },
+			promote: true,
+		});
+	});
+
+	it('Create with provider keeps other overlay fields and lets the dropdown win', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_abc' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'researcher',
+				agentProvider: 'anthropic',
+				// Overlay JSON also names a provider — the dropdown overrides it.
+				overlay: '{"provider":"openai","model":"claude-sonnet-4-5"}',
+				promote: false,
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.agentDef).toHaveBeenCalledWith({
+			op: 'create',
+			name: 'researcher',
+			overlay: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+			promote: false,
+		});
+	});
+
+	it('Create with empty agentProvider leaves provider unset', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_abc' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'researcher',
+				agentProvider: '',
+				overlay: '{"model":"claude-sonnet-4-5"}',
+				promote: false,
+			},
+		});
+		await node.execute.call(ctx);
+		const arg = mockClient.agentDef.mock.calls[0][0];
+		expect(arg.overlay).toEqual({ model: 'claude-sonnet-4-5' });
+		expect((arg.overlay as Record<string, unknown>).provider).toBeUndefined();
+	});
+
+	it('Fork folds agentProvider into the overlay diff', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_new' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'fork',
+				parentDefId: 'def_abc',
+				agentProvider: 'code-js',
+				overlay: '{}',
+				promote: false,
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.agentDef).toHaveBeenCalledWith({
+			op: 'fork',
+			parent_def_id: 'def_abc',
+			overlay: { provider: 'code-js' },
+			promote: false,
+		});
+	});
+
 	it('wraps response in { result } envelope', async () => {
 		mockClient.agentDef.mockResolvedValue({ def_id: 'def_x' });
 		const node = new LoomCycle();

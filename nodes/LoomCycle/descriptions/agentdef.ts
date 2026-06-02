@@ -126,6 +126,76 @@ export const agentDefOps: INodeProperties[] = [
 		description: 'Operator-visible description of this version. Helps audit the lineage later.',
 	},
 
+	// ---- Provider (Create / Fork) ----
+	// Folded into overlay.provider by executeAgentDef. Default '' leaves the
+	// provider unset so it falls through to the Overlay JSON / loomcycle
+	// default (preserves the pre-existing create behaviour). Selecting
+	// `code-js` marks this as a deterministic JavaScript agent (RFC J).
+	{
+		displayName: 'Provider',
+		name: 'agentProvider',
+		type: 'options',
+		default: '',
+		displayOptions: { show: { resource: ['agentDef'], operation: ['create', 'fork'] } },
+		options: [
+			{
+				name: 'Anthropic',
+				value: 'anthropic',
+				description: 'Anthropic Claude models',
+			},
+			{
+				name: 'Code-JS (Deterministic JavaScript)',
+				value: 'code-js',
+				description:
+					'Synthetic provider — the agent runs operator-deployed JavaScript instead of an LLM (RFC J). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
+			},
+			{
+				name: 'DeepSeek',
+				value: 'deepseek',
+				description: 'DeepSeek models',
+			},
+			{
+				name: 'Default (Set via Overlay JSON)',
+				value: '',
+				description: 'Leave the provider unset — configure it in the Overlay JSON below, or let loomcycle apply its default',
+			},
+			{
+				name: 'Google Gemini',
+				value: 'gemini',
+				description: 'Google Gemini models',
+			},
+			{
+				name: 'Ollama',
+				value: 'ollama',
+				description: 'Local Ollama models',
+			},
+			{
+				name: 'OpenAI',
+				value: 'openai',
+				description: 'OpenAI models',
+			},
+		],
+		description:
+			'Optional provider for this agent definition, folded into the overlay as `provider`. Providers are operator-defined in loomcycle.yaml; for any not listed, set `provider` in the Overlay JSON instead. The model still comes from the Overlay JSON (omit it for code-js).',
+	},
+
+	// ---- code-js deploy notice (Create / Fork, provider=code-js) ----
+	// code-js loads its JS from agent_code/<name>/index.js on the loomcycle
+	// host filesystem (operator-trust, like the Bash tool) — there is no
+	// wire path to upload code, so this node only registers the def row that
+	// points at it. Mirrors the MCP env-var-mirror notice pattern.
+	{
+		displayName: 'Deploy the JavaScript on the Loomcycle Host',
+		name: 'codeJsDeployNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: {
+			show: { resource: ['agentDef'], operation: ['create', 'fork'], agentProvider: ['code-js'] },
+		},
+		description:
+			'Code-JS agents run operator-deployed JavaScript, not an LLM. Place this agent\'s code at `agent_code/&lt;name&gt;/index.js` (under LOOMCYCLE_CODE_AGENTS_ROOT) on the loomcycle host — loomcycle reads it from disk; it is NOT uploaded through n8n. This node only registers the definition that points at it. Requires `LOOMCYCLE_CODE_AGENTS_ENABLED=1` on the host; leave the model unset in the Overlay JSON.',
+	},
+
 	// ---- Overlay JSON (Create / Fork) ----
 	{
 		displayName: 'Overlay (JSON)',
@@ -135,7 +205,7 @@ export const agentDefOps: INodeProperties[] = [
 		typeOptions: { rows: 6 },
 		displayOptions: { show: { resource: ['agentDef'], operation: ['create', 'fork'] } },
 		description:
-			'JSON object containing the agent\'s content-bearing fields (e.g. model, max_iterations, allowed_tools, system_prompt). For Fork this is merged onto the parent. For Create this defines the initial row.',
+			'JSON object containing the agent\'s content-bearing fields (e.g. model, max_iterations, allowed_tools, system_prompt). For Fork this is merged onto the parent. For Create this defines the initial row. The Provider dropdown above overrides any `provider` key set here.',
 	},
 
 	// ---- Promote-After-Create (Create / Fork) ----
