@@ -44,7 +44,7 @@ Eighteen nodes (11 action + 2 trigger + 5 cluster sub-nodes) plus one credential
 
 ### Credential
 
-- **LoomCycle API** — bearer token + base URL + optional Default User ID / User Tier / MCP URL. The credential test hits `GET /healthz`.
+- **LoomCycle API** — bearer token + base URL + optional Default User ID / User Tier / MCP URL. The credential test calls `GET /v1/_me` (whoami) to validate the bearer resolves to a principal (tenant + scopes) — requires loomcycle ≥ v0.17. Under v0.17's multi-tenant authorization (RFC L), the bearer is a tenant-scoped `OperatorTokenDef` token; provision it with the scopes your workflow's operations need.
 
 ### Action nodes
 
@@ -89,7 +89,7 @@ In n8n, navigate to **Settings → Credentials → New** and pick **LoomCycle AP
 | Default User Tier | no | Same fall-through |
 | MCP URL (optional) | no | Only needed if you reference loomcycle's MCP server from n8n's MCP Client Tool sub-node (Vector 1) |
 
-Click **Test** → expect a green checkmark when the deployment is reachable. Behind the scenes: `GET /healthz` with `Authorization: Bearer <token>`.
+Click **Test** → a green checkmark means the bearer authenticated. Behind the scenes: `GET /v1/_me` with `Authorization: Bearer <token>` — this resolves the token's principal (tenant + scopes), so an invalid / expired / wrong-tenant token fails the test here rather than at runtime. (Requires loomcycle ≥ v0.17.)
 
 ## Examples
 
@@ -195,13 +195,13 @@ For deployments behind reverse proxies / Cloudflare workers that strip long-live
 
 ### `Authentication failed` after credential test
 
-The bearer token doesn't match the loomcycle deployment's `LOOMCYCLE_AUTH_TOKEN`. Verify by `curl`:
+The bearer doesn't resolve to a valid principal. Verify with `curl` against the same endpoint the credential test uses:
 
 ```bash
-curl -H "Authorization: Bearer <your-token>" http://127.0.0.1:8787/healthz
+curl -H "Authorization: Bearer <your-token>" http://127.0.0.1:8787/v1/_me
 ```
 
-Expect `{"ok":true}`.
+Expect a principal JSON (`{"tenant_id":"…","subject":"…","scopes":[…],…}`). A `401` means the token is invalid/expired; a `404` means the deployment is older than v0.17. Under v0.17 multi-tenant auth, also check the token has the **scopes** for the operations your workflow calls — a missing scope surfaces as a `403` at runtime even though the credential test passes.
 
 ### `Channel not declared` on a Publish
 
