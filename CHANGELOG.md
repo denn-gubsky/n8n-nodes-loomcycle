@@ -2,6 +2,20 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-06-02
+
+**Minor release (full edition).** Ergonomic authoring for loomcycle **code-js** agents (RFC J — deterministic JavaScript agents) on the existing Agent Definition node. Mirrors slim-edition 3.2.0. No new node, no adapter bump: code-js is a synthetic *provider*, so it rides the existing `agentDef()` + Run lifecycle.
+
+### Added
+
+- **`Agent Definition → Create` / `Fork`: a Provider dropdown.** Anthropic / Code-JS / DeepSeek / OpenAI / Google Gemini / Ollama, plus a "Set via Overlay JSON" default that preserves the prior behaviour. The selected provider is folded into the definition overlay as `provider` and overrides any `provider` key set in the Overlay JSON.
+- **Code-JS deploy notice.** When **Code-JS** is selected, the node shows a reminder that the agent's JavaScript is deployed host-side to `agent_code/<name>/index.js` (under `LOOMCYCLE_CODE_AGENTS_ROOT`, requires `LOOMCYCLE_CODE_AGENTS_ENABLED=1`) — loomcycle reads it from disk; the code is never uploaded through n8n. Mirrors the MCP env-var-mirror pattern.
+- **README `Code-JS agents` section** documenting the author-in-n8n / deploy-on-host split.
+
+### Notable design decisions
+
+- **No JS-code editor field in n8n.** loomcycle loads code-js JavaScript from its own filesystem by deliberate design (operator-trust posture, opt-in `CodeAgentsEnabled`); there is no wire path to upload code. A code editor would have nowhere to send the code, so the node surfaces a deploy reminder instead.
+
 ## [1.2.0] — 2026-05-25
 
 **Minor release.** Closes the long-standing memory-writes gap + adds runtime channel admin CRUD. Both surfaces consume `@loomcycle/client@^0.11.5`'s newly-typed `setMemoryEntry` / `deleteMemoryEntry` / `createChannel` / `updateChannel` / `deleteChannel` methods.

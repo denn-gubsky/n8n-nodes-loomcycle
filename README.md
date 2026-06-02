@@ -53,7 +53,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Run** — `Spawn` / `Get Status` / `Wait for Completion` / `Cancel` / `List Agents`
 - **LoomCycle Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD; per-tool credentials `userCredentials` map on Spawn require loomcycle ≥ v0.12.x)
 - **LoomCycle Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` (message-flow + runtime admin CRUD; yaml-declared channels remain immutable)
-- **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip)
+- **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip). Create/Fork expose a **Provider** dropdown (folded into the overlay); selecting **Code-JS** authors a [deterministic JavaScript agent](#code-js-agents) (RFC J).
 - **LoomCycle Skill Definition** — same 7 ops as AgentDef, applied to skills
 - **LoomCycle MCP Server** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
 - **LoomCycle Schedule** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — substrate-native scheduled runs (RFC E; requires loomcycle ≥ v0.12.x). Fired runs land on the **Run Completed** trigger.
@@ -129,6 +129,18 @@ The cluster sub-node logs the detected env-var names so you can see them in n8n'
 ```
 [LoomCycleMcpServerTool] MCP server slack-mcp registered. Required env vars on loomcycle: LOOMCYCLE_SLACK_TOKEN
 ```
+
+## Code-JS agents
+
+[code-js](https://github.com/denn-gubsky/loomcycle) (RFC J) is a loomcycle **synthetic provider**: the agent runs operator-deployed JavaScript instead of an LLM — deterministic, replayable, no model cost. A code-js agent is just an Agent Definition with `provider: code-js` (and no model), spawned through the normal **LoomCycle Run** → **Run Completed** lifecycle. No dedicated node is needed.
+
+**Author it from n8n:** on **LoomCycle Agent Definition → Create** (or **Fork**), pick **Code-JS** in the Provider dropdown. The node folds `provider: code-js` into the overlay and shows a deploy reminder. Leave the model unset in the Overlay JSON.
+
+**The code lives on the loomcycle host — like the [env-var mirror](#the-env-var-mirror) for MCP servers, the sensitive artifact never crosses the wire:**
+
+1. Deploy the JavaScript to `agent_code/<name>/index.js` (under `LOOMCYCLE_CODE_AGENTS_ROOT`, default `./agent_code`) on the loomcycle deployment. `<name>` matches the Agent Definition name. loomcycle reads it from disk; **it is not uploaded through n8n.**
+2. Enable the provider on the host: `LOOMCYCLE_CODE_AGENTS_ENABLED=1` (default off — operator-trust, same posture as the Bash tool). For reproducible runs, optionally `LOOMCYCLE_CODE_AGENTS_DETERMINISTIC=1`.
+3. Register the definition from n8n (step above), then spawn it like any other agent.
 
 ## Local development install
 
