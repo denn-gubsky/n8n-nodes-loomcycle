@@ -33,7 +33,7 @@ export class LoomCycleApi implements ICredentialType {
 			default: 'http://127.0.0.1:8787',
 			required: true,
 			placeholder: 'http://127.0.0.1:8787',
-			description: 'Base URL of the loomcycle HTTP API. The /healthz endpoint is used to validate the credential.',
+			description: 'Base URL of the loomcycle HTTP API. The credential test calls /v1/_me to validate the bearer token (requires loomcycle ≥ v0.17).',
 		},
 		{
 			displayName: 'Bearer Token',
@@ -80,10 +80,15 @@ export class LoomCycleApi implements ICredentialType {
 		},
 	};
 
+	// Validate against /v1/_me (whoami, loomcycle ≥ v0.17 RFC L) rather than
+	// the unauthenticated /healthz liveness probe — /v1/_me actually exercises
+	// the bearer, so an invalid / expired / wrong-tenant token fails the
+	// credential test at setup time instead of silently passing and erroring
+	// at runtime. Returns the authoritative principal (tenant_id + scopes).
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/healthz',
+			url: '/v1/_me',
 			method: 'GET',
 		},
 	};

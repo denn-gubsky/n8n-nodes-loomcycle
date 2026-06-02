@@ -88,9 +88,9 @@ describe('LoomCycleApi credential', () => {
 	});
 
 	describe('credential test', () => {
-		it('hits /healthz on the configured baseUrl', () => {
+		it('validates the bearer against /v1/_me on the configured baseUrl', () => {
 			const req = cred.test.request;
-			expect(req.url).toBe('/healthz');
+			expect(req.url).toBe('/v1/_me');
 			expect(req.method).toBe('GET');
 			expect(req.baseURL).toBe('={{$credentials.baseUrl}}');
 		});
