@@ -407,6 +407,21 @@ async function executeAgentDef(
 	i: number,
 ): Promise<IDataObject> {
 	const input = buildSubstrateInput(ctx, operation, i);
+
+	// Fold the Provider dropdown into the overlay. Empty = leave unset
+	// (provider stays whatever the Overlay JSON / loomcycle default supplies).
+	// A selected provider wins over any `provider` key in the Overlay JSON so
+	// the dropdown is authoritative. code-js marks a deterministic JS agent
+	// (RFC J) — its JavaScript is deployed host-side, not via this call.
+	if (operation === 'create' || operation === 'fork') {
+		const provider = ctx.getNodeParameter('agentProvider', i, '') as string;
+		if (provider) {
+			const overlay = (input.overlay ?? {}) as Record<string, unknown>;
+			overlay.provider = provider;
+			input.overlay = overlay;
+		}
+	}
+
 	const resp = await client.agentDef(input);
 	return { result: resp } as IDataObject;
 }
