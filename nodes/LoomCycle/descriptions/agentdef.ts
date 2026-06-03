@@ -126,6 +126,92 @@ export const agentDefOps: INodeProperties[] = [
 		description: 'Operator-visible description of this version. Helps audit the lineage later.',
 	},
 
+	// ---- Provider (Create / Fork) ----
+	// Folded into overlay.provider by executeAgentDef. Default '' leaves the
+	// provider unset so it falls through to the Overlay JSON / loomcycle
+	// default (preserves the pre-existing create behaviour). Selecting
+	// `code-js` marks this as a deterministic JavaScript agent (RFC J).
+	{
+		displayName: 'Provider',
+		name: 'agentProvider',
+		type: 'options',
+		default: '',
+		displayOptions: { show: { resource: ['agentDef'], operation: ['create', 'fork'] } },
+		options: [
+			{
+				name: 'Anthropic',
+				value: 'anthropic',
+				description: 'Anthropic Claude models',
+			},
+			{
+				name: 'Code-JS (Deterministic JavaScript)',
+				value: 'code-js',
+				description:
+					'Synthetic provider — the agent runs inline JavaScript instead of an LLM (RFC J). Enter the code below; it is ingested via code_body (loomcycle ≥ v0.20). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
+			},
+			{
+				name: 'DeepSeek',
+				value: 'deepseek',
+				description: 'DeepSeek models',
+			},
+			{
+				name: 'Default (Set via Overlay JSON)',
+				value: '',
+				description: 'Leave the provider unset — configure it in the Overlay JSON below, or let loomcycle apply its default',
+			},
+			{
+				name: 'Google Gemini',
+				value: 'gemini',
+				description: 'Google Gemini models',
+			},
+			{
+				name: 'Ollama',
+				value: 'ollama',
+				description: 'Local Ollama models',
+			},
+			{
+				name: 'OpenAI',
+				value: 'openai',
+				description: 'OpenAI models',
+			},
+		],
+		description:
+			'Optional provider for this agent definition, folded into the overlay as `provider`. Providers are operator-defined in loomcycle.yaml; for any not listed, set `provider` in the Overlay JSON instead. The model still comes from the Overlay JSON (omit it for code-js).',
+	},
+
+	// ---- code-js JavaScript body (Create / Fork, provider=code-js) ----
+	// v0.20.0 (commit 1c896c2): code-js JS is ingested INLINE via
+	// overlay.code_body — no host filesystem bind. executeAgentDef folds this
+	// field into overlay.code_body. jsEditor (not codeNodeEditor) gives a plain
+	// JS editor WITHOUT n8n's $json/$input autocomplete, which would be
+	// misleading for loomcycle-runtime JS. Empty ⇒ loomcycle falls back to the
+	// host agent_code/<name>/index.js path (inline wins when present).
+	{
+		displayName: 'JavaScript Code',
+		name: 'code',
+		type: 'string',
+		typeOptions: { editor: 'jsEditor', rows: 12 },
+		default: '',
+		displayOptions: {
+			show: { resource: ['agentDef'], operation: ['create', 'fork'], agentProvider: ['code-js'] },
+		},
+		description:
+			'Inline JavaScript source for this code-js agent, ingested via `code_body` (loomcycle ≥ v0.20). It is compiled + content-hashed at registration. Leave empty to fall back to `agent_code/&lt;name&gt;/index.js` on the host.',
+	},
+
+	// ---- code-js gate reminder (Create / Fork, provider=code-js) ----
+	{
+		displayName: 'Requires Code Agents Enabled on Loomcycle',
+		name: 'codeJsNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: {
+			show: { resource: ['agentDef'], operation: ['create', 'fork'], agentProvider: ['code-js'] },
+		},
+		description:
+			'The loomcycle host must run with `LOOMCYCLE_CODE_AGENTS_ENABLED=1` or registration is refused. Inline code is operator-trust (same posture as the Bash tool), compiled at create, and capped at ~256 KB. Leave the model unset in the Overlay JSON.',
+	},
+
 	// ---- Overlay JSON (Create / Fork) ----
 	{
 		displayName: 'Overlay (JSON)',
@@ -135,7 +221,7 @@ export const agentDefOps: INodeProperties[] = [
 		typeOptions: { rows: 6 },
 		displayOptions: { show: { resource: ['agentDef'], operation: ['create', 'fork'] } },
 		description:
-			'JSON object containing the agent\'s content-bearing fields (e.g. model, max_iterations, allowed_tools, system_prompt). For Fork this is merged onto the parent. For Create this defines the initial row.',
+			'JSON object containing the agent\'s content-bearing fields (e.g. model, max_iterations, allowed_tools, system_prompt). For Fork this is merged onto the parent. For Create this defines the initial row. The Provider dropdown above overrides any `provider` key set here.',
 	},
 
 	// ---- Promote-After-Create (Create / Fork) ----
