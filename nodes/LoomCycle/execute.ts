@@ -469,6 +469,15 @@ async function executeMcpServerDef(
 		if (Object.keys(headers).length > 0) input.headers = headers;
 	}
 
+	// v0.20.0: create/fork auto-discover the tool set (tools/list) at
+	// ingestion. `discover` defaults true server-side, so only forward it
+	// when the operator opts OUT — keeps the wire payload minimal and leaves
+	// pre-v0.20 behaviour byte-identical for the common (discover-on) case.
+	if (operation === 'create' || operation === 'fork') {
+		const discover = ctx.getNodeParameter('discover', i, true) as boolean;
+		if (!discover) input.discover = false;
+	}
+
 	const resp = await client.mcpServerDef(input);
 	return { result: resp } as IDataObject;
 }

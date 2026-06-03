@@ -110,9 +110,15 @@ Import via **Workflows → Import from File**, then attach your LoomCycle API cr
 
 The `LoomCycleMcpServerTool` cluster sub-node is the package's signature feature. When the parent AI Agent invokes it:
 
-1. **On first run:** calls `mcpServerDef({op: 'get', name})` → on `NotFoundError`, calls `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. The substrate registers the MCP server; subsequent agent spawns can reference it as `mcp__<name>__*`.
+1. **On first run:** calls `mcpServerDef({op: 'get', name})` → on `NotFoundError`, calls `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. The substrate registers the MCP server; subsequent agent spawns can reference it as `mcp__<name>__*`. (On loomcycle ≥ v0.20 a re-register of identical content is a server-side no-op — `deduplicated: true` — so the get-first step is an optimisation, not a correctness requirement.)
 2. **On subsequent runs:** the `get` succeeds; `create` is skipped. Idempotent.
 3. **On invocation:** spawns the configured loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. The agent has access to the MCP server's tool surface for the duration of the run.
+
+The same registration is also available explicitly via the **LoomCycle MCP Server** action node (Register / Fork / Promote / Retire / Get / List / Rediscover / Verify) when you want to provision ahead of any Run nodes rather than lazily on first agent invocation.
+
+**Tool auto-discovery (loomcycle ≥ v0.20).** Register/Fork run the MCP `tools/list` handshake at registration and return a `discovered` count in the node output — you see the tool surface immediately instead of waiting for first call. It's best-effort: an unreachable peer still registers and self-heals lazily. Untick **Discover Tools at Registration** (action node) to register connection metadata only.
+
+**Two create-time checks to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one), and inner `${LOOMCYCLE_*}` header tokens are **expanded at registration** — so those env vars must exist on the deployment before you Register, or the discovery handshake authenticates with an unresolved token.
 
 ### The env-var mirror
 
