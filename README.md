@@ -131,9 +131,13 @@ Import via **Workflows → Import from File**, then attach your LoomCycle API cr
 
 The **LoomCycle MCP Server** action node registers HTTP / Streamable-HTTP MCP servers in the substrate at workflow-design time (run it once, ahead of any Run nodes), so spawned agents can reference them as `mcp__<name>__*`:
 
-1. **Register:** `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. For idempotent setup, run **Get** first and only **Register** on `NotFoundError`.
+1. **Register:** `mcpServerDef({op: 'create', name, transport, url, headers, promote: true})`. Re-registering identical content is a no-op (`deduplicated: true`) on loomcycle ≥ v0.20, so you can run Register unconditionally — no Get-first dance needed.
 2. **Manage:** Fork / Promote / Retire / Rediscover / Verify the registration as versioned MCPServerDefs.
 3. Spawn agents (via **LoomCycle Run**) with `allowed_tools: ['mcp__<name>__*']` to give them the MCP server's tool surface.
+
+**Tool auto-discovery (loomcycle ≥ v0.20).** Register/Fork run the MCP `tools/list` handshake at registration and return a `discovered` count in the node output — you can see the tool surface immediately instead of waiting for first call. It's best-effort: an unreachable peer still registers and self-heals lazily. Untick **Discover Tools at Registration** to register connection metadata only.
+
+**Two create-time checks to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one), and inner `${LOOMCYCLE_*}` header tokens are **expanded at registration** — so those env vars must exist on the deployment before you Register, or the discovery handshake authenticates with an unresolved token.
 
 > *(Through v2.x this was an auto-provisioning AI-Agent cluster tool. That tool was langchain-based and removed in v3.0.0; the same substrate capability is now driven explicitly via the MCP Server action node.)*
 

@@ -2,6 +2,23 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] — 2026-06-02
+
+**Minor release.** Surfaces loomcycle **v0.20** MCP dynamic-ingestion behaviour on the MCP Server node. Pairs with the code-js inline work in 3.2.0; both bump the adapter to `^0.20.0`.
+
+### Added
+
+- **`MCP Server → Register` / `Fork`: a "Discover Tools at Registration" toggle** (default on). loomcycle ≥ v0.20 runs the `tools/list` handshake at ingestion and returns a `discovered` count in the node output (best-effort — an unreachable peer still registers and self-heals). Folded to the wire as `discover` only when turned off, so existing Register payloads are unchanged.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.14.1` → `^0.20.0`.
+- **Field hints updated for v0.20 create-time behaviour:** the URL host is now allowlist-checked *at registration* (loopback/RFC1918 hosts need the private host allowlist); inner `${LOOMCYCLE_*}` header tokens are *expanded at registration*, so the env vars must exist on the deployment before Register; content-addressed re-registration is a no-op (`deduplicated: true`).
+
+### Notable design decisions
+
+- **`discover` is only sent when turned off.** True is the server default, so omitting it keeps the wire payload byte-identical to pre-v0.20 for the common case and avoids perturbing existing workflows.
+- **No `Ensure` operation.** The substrate already dedups create by `content_sha256`, so re-running Register is effectively idempotent; the explicit op-discriminated surface (8 ops) stays uniform rather than adding a parallel `ensureMcpServer` path.
 ## [3.2.0] — 2026-06-02
 
 **Minor release.** Inline authoring for loomcycle **code-js** agents (RFC J — deterministic JavaScript agents) on the existing Agent Definition node. code-js is a synthetic *provider*, so it rides the existing `agentDef()` + Run lifecycle — no new node.

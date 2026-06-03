@@ -16,8 +16,16 @@ import type { INodeProperties } from 'n8n-workflow';
  *
  * Hard constraints enforced substrate-side:
  *   - Transport must be HTTP or Streamable-HTTP (stdio rejected — yaml-only).
- *   - URL hostname must be in operator's HTTPHostAllowlist (SSRF defence).
+ *   - URL hostname must be in the HTTPHostAllowlist (or the private host
+ *     allowlist for loopback/RFC1918) — enforced at REGISTRATION as of v0.20.
  *   - Name collisions with static yaml mcp_servers entries are refused.
+ *
+ * v0.20.0 ingestion behaviour:
+ *   - create/fork auto-run the tools/list handshake (best-effort) so the
+ *     `discovered` count rides the response; the `discover` toggle opts out.
+ *   - inner `${LOOMCYCLE_*}` header tokens are expanded at registration.
+ *   - create is content-addressed: a byte-identical re-register is a no-op
+ *     (`deduplicated: true`) instead of minting a new version.
  *
  * Headers carry the v0.8.14 `${LOOMCYCLE_*}` / `${run.user_bearer}`
  * substitution patterns; n8n nodes accept TEMPLATE STRINGS only —
@@ -170,7 +178,7 @@ export const mcpServerDefOps: INodeProperties[] = [
 		required: true,
 		placeholder: 'https://mcp.example.com/v1',
 		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create'] } },
-		description: 'MCP server endpoint URL. The hostname must be in loomcycle\'s HTTPHostAllowlist (SSRF defence).',
+		description: 'MCP server endpoint URL. The hostname must be in loomcycle\'s HTTPHostAllowlist — or, for a loopback / RFC1918 callback host, the private host allowlist. Enforced at registration time (loomcycle ≥ v0.20), not just at first call.',
 	},
 
 	// ---- Headers (Register only) ----
@@ -219,7 +227,23 @@ export const mcpServerDefOps: INodeProperties[] = [
 		default: '',
 		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create'] } },
 		description:
-			'Loomcycle substitutes `${LOOMCYCLE_*}` tokens in header values from its own env at request time. Set these env vars on the loomcycle deployment before registering — the node validates the substitution at registration time but will not transmit plaintext credentials.',
+			'Loomcycle substitutes `${LOOMCYCLE_*}` tokens in header values from its own env. As of loomcycle v0.20 these are expanded at REGISTRATION time (not just per-request), so the env vars must exist on the deployment before you Register or the discovery handshake authenticates with an unresolved token. Per-run `${run.*}` placeholders stay literal. Plaintext credentials never travel this wire path.',
+	},
+
+	// ---- Discover tools at registration (Register / Fork) ----
+	// v0.20.0 (commit b137786): loomcycle runs the tools/list handshake at
+	// create/fork so discovered_tools is populated immediately; the response
+	// carries a `discovered` count. Folded as a top-level `discover` input by
+	// executeMcpServerDef ONLY when turned off (true is the server default),
+	// keeping the wire payload minimal for the common case.
+	{
+		displayName: 'Discover Tools at Registration',
+		name: 'discover',
+		type: 'boolean',
+		default: true,
+		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create', 'fork'] } },
+		description:
+			'Whether to run the MCP `tools/list` handshake at registration (loomcycle ≥ v0.20) so the server\'s tool set is cached immediately and returned as `discovered` (a count) in the node output. Best-effort — an unreachable peer still registers and self-heals on first call. Turn off to register connection metadata only and discover lazily.',
 	},
 
 	// ---- Description (Register / Fork) ----
