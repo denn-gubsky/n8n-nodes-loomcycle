@@ -92,6 +92,46 @@ describe('LoomCycle resource=mcpServerDef', () => {
 			expect(arg.headers).toBeUndefined();
 		});
 
+		it('omits discover when left at the default (auto-discovery on)', async () => {
+			mockClient.mcpServerDef.mockResolvedValue({ def_id: 'mcpdef_1', discovered: 7 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'mcpServerDef',
+					operation: 'create',
+					name: 'slack-mcp',
+					transport: 'http',
+					url: 'http://localhost:9999',
+					headers: {},
+					discover: true,
+					promote: true,
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.mcpServerDef.mock.calls[0][0];
+			expect(arg.discover).toBeUndefined();
+		});
+
+		it('forwards discover:false when auto-discovery is turned off', async () => {
+			mockClient.mcpServerDef.mockResolvedValue({ def_id: 'mcpdef_1' });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'mcpServerDef',
+					operation: 'create',
+					name: 'slack-mcp',
+					transport: 'http',
+					url: 'http://localhost:9999',
+					headers: {},
+					discover: false,
+					promote: true,
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.mcpServerDef.mock.calls[0][0];
+			expect(arg.discover).toBe(false);
+		});
+
 		it('rejects stdio transport with NodeOperationError', async () => {
 			const node = new LoomCycle();
 			const ctx = makeExecuteContext({
