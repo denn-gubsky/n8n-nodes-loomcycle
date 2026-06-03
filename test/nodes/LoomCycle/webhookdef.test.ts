@@ -57,6 +57,30 @@ describe('LoomCycle Webhook (resource=webhookDef)', () => {
 		expect(arg.overlay.channel).toBeUndefined();
 	});
 
+	it('Create folds static metadata + per-delivery credentials into overlay (v0.21)', async () => {
+		mockClient.webhookDef.mockResolvedValue({ def_id: 'wh_md' });
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'webhookDef',
+				operation: 'create',
+				name: 'gh-push',
+				agent: 'reviewer',
+				channel: '',
+				enabled: true,
+				promote: true,
+				metadata: '{"source":"github"}',
+				userCredentials: { credential: [{ name: 'gh', value: '${LOOMCYCLE_GH_TOKEN}' }] },
+				overlay: '{"payload_mapping":{"run_metadata.repo":"$.repository.full_name"}}',
+			},
+		});
+		await new LoomCycleWebhook().execute.call(ctx);
+		const arg = mockClient.webhookDef.mock.calls[0][0];
+		expect(arg.overlay.metadata).toEqual({ source: 'github' });
+		expect(arg.overlay.user_credentials).toEqual({ gh: '${LOOMCYCLE_GH_TOKEN}' });
+		// request-sourced metadata mapping rides through the advanced overlay
+		expect(arg.overlay.payload_mapping).toEqual({ 'run_metadata.repo': '$.repository.full_name' });
+	});
+
 	it('structured create fields override matching keys in the advanced overlay', async () => {
 		mockClient.webhookDef.mockResolvedValue({ def_id: 'wh_2' });
 		const ctx = makeExecuteContext({

@@ -2,6 +2,27 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] — 2026-06-02
+
+**Minor release.** Surfaces loomcycle **v0.21** non-secret **metadata channel** — structured context delivered to the agent (a code-js agent reads `input.metadata`; an LLM agent gets a trusted prompt block). Adapter pinned `^0.21.0`.
+
+### Added
+
+- **`Run → Spawn`: a Metadata (JSON) field** (under Additional Fields) → `RunOptions.metadata`. Per-call, trusted, not inherited by continuations.
+- **`Schedule → Create` / `Fork`: a Metadata (JSON) field** → `overlay.metadata`. Static, delivered on every fire; override per fork (e.g. a distinct `repo` per tenant).
+- **`Webhook → Create` / `Fork`: a Metadata (JSON) field** → `overlay.metadata` (static, **trusted**). Request-sourced metadata is wired via `payload_mapping` `run_metadata.<name>` targets in the Advanced Overlay (projected from the inbound body, delivered **untrusted** + fenced) — documented in the field hints.
+- **`Webhook → Create` / `Fork`: Per-Delivery Credentials** (template strings → `overlay.user_credentials`), reaching parity with the Schedule node's per-fire credentials (loomcycle v0.21 WebhookDef creds parity).
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.20.0` → `^0.21.0` — consumes `RunOptions.metadata` / `ContinueOptions.metadata`.
+
+### Notable design decisions
+
+- **Metadata is a JSON-object field, not a name/value collection.** loomcycle types it as `Record<string, unknown>` (values may be nested/numbers), so a JSON field is the faithful surface — unlike the credentials maps, whose values are always template strings.
+- **Empty `{}` is omitted from the wire**, so existing Run/Schedule/Webhook payloads are byte-identical when the field is untouched. A shared `parseObjectField` helper strict-parses (malformed JSON → clear node error) and drops empty/non-object input.
+- **Static vs request-sourced webhook metadata stay distinct.** Static `metadata` is operator-authored and trusted; `run_metadata.*` payload-mapping targets are attacker-influenceable and delivered untrusted — the node keeps the trusted field structured and leaves the untrusted mapping to the Advanced Overlay, mirroring loomcycle's own split.
+
 ## [3.3.0] — 2026-06-02
 
 **Minor release.** Surfaces loomcycle **v0.20** MCP dynamic-ingestion behaviour on the MCP Server node. Pairs with the code-js inline work in 3.2.0; both bump the adapter to `^0.20.0`.

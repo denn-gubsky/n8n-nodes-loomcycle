@@ -128,6 +128,18 @@ export const runOps: INodeProperties[] = [
 				description: 'Comma-separated tool-name list to narrow the agent\'s allowed_tools beyond the operator floor. Empty = no narrowing.',
 			},
 			{
+				// loomcycle v0.21: non-secret structured metadata channel.
+				// Trusted (first-party bearer) — code-js reads input.metadata,
+				// LLM agents get a trusted prompt block. Per-call, not session
+				// state. NOT for secrets — those go in Per-Tool Credentials.
+				displayName: 'Metadata (JSON)',
+				name: 'metadata',
+				type: 'json',
+				default: '{}',
+				description:
+					'Non-secret structured metadata (JSON object) passed to the agent (loomcycle ≥ v0.21). A code-js agent reads it as `input.metadata`; an LLM agent receives it as a trusted prompt block. Per-call, not session state. Use Per-Tool Credentials for secrets — metadata is safe to log.',
+			},
+			{
 				// RFC F (loomcycle v0.12.x): per-tool named credentials map.
 				// Template-string values only (${LOOMCYCLE_*} / ${run.*}) —
 				// plaintext secrets must never travel this wire path
