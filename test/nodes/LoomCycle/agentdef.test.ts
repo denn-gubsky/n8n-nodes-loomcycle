@@ -187,6 +187,73 @@ describe('LoomCycle resource=agentDef', () => {
 		});
 	});
 
+	it('Create folds inline code into overlay.code_body for code-js', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_js', content_sha256: 'sha256:zz' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'nightly-report',
+				agentProvider: 'code-js',
+				code: 'export default async (ctx) => ctx.done("hi");',
+				overlay: '{}',
+				promote: true,
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.agentDef).toHaveBeenCalledWith({
+			op: 'create',
+			name: 'nightly-report',
+			overlay: {
+				provider: 'code-js',
+				code_body: 'export default async (ctx) => ctx.done("hi");',
+			},
+			promote: true,
+		});
+	});
+
+	it('Create omits code_body when the code editor is empty (filesystem fallback)', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_js' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'fs-agent',
+				agentProvider: 'code-js',
+				code: '',
+				overlay: '{}',
+				promote: true,
+			},
+		});
+		await node.execute.call(ctx);
+		const arg = mockClient.agentDef.mock.calls[0][0];
+		expect(arg.overlay).toEqual({ provider: 'code-js' });
+		expect((arg.overlay as Record<string, unknown>).code_body).toBeUndefined();
+	});
+
+	it('Create ignores code when provider is not code-js', async () => {
+		mockClient.agentDef.mockResolvedValue({ def_id: 'def_abc' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'agentDef',
+				operation: 'create',
+				name: 'researcher',
+				agentProvider: 'anthropic',
+				// A stale code value must NOT leak onto a non-code-js provider.
+				code: 'console.log("should be ignored")',
+				overlay: '{"model":"claude-sonnet-4-5"}',
+				promote: false,
+			},
+		});
+		await node.execute.call(ctx);
+		const arg = mockClient.agentDef.mock.calls[0][0];
+		expect(arg.overlay).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-5' });
+		expect((arg.overlay as Record<string, unknown>).code_body).toBeUndefined();
+	});
+
 	it('Create with provider keeps other overlay fields and lets the dropdown win', async () => {
 		mockClient.agentDef.mockResolvedValue({ def_id: 'def_abc' });
 		const node = new LoomCycle();

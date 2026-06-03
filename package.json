@@ -73,7 +73,7 @@
 		"n8n-workflow": "*"
 	},
 	"devDependencies": {
-		"@loomcycle/client": "^0.14.1",
+		"@loomcycle/client": "^0.20.0",
 		"@n8n/ai-node-sdk": "^0.13.1",
 		"@types/node": "^20.14.0",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",

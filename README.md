@@ -149,15 +149,13 @@ At request time, loomcycle substitutes `${LOOMCYCLE_*}` tokens from its own envi
 
 ## Code-JS agents
 
-[code-js](https://github.com/denn-gubsky/loomcycle) (RFC J) is a loomcycle **synthetic provider**: the agent runs operator-deployed JavaScript instead of an LLM — deterministic, replayable, no model cost. A code-js agent is just an Agent Definition with `provider: code-js` (and no model), spawned through the normal **LoomCycle Run** → **Run Completed** lifecycle. No dedicated node is needed.
+[code-js](https://github.com/denn-gubsky/loomcycle) (RFC J) is a loomcycle **synthetic provider**: the agent runs deterministic JavaScript instead of an LLM — replayable, no model cost. A code-js agent is just an Agent Definition with `provider: code-js` (and no model), spawned through the normal **LoomCycle Run** → **Run Completed** lifecycle. No dedicated node is needed.
 
-**Author it from n8n:** on **LoomCycle Agent Definition → Create** (or **Fork**), pick **Code-JS** in the Provider dropdown. The node folds `provider: code-js` into the overlay and shows a deploy reminder. Leave the model unset in the Overlay JSON.
+**Author it inline from n8n** (loomcycle ≥ **v0.20**): on **LoomCycle Agent Definition → Create** (or **Fork**), pick **Code-JS** in the Provider dropdown and write the source in the **JavaScript Code** editor that appears. The node folds it into the overlay as `code_body`; loomcycle compiles + content-hashes it at registration. No host filesystem access needed — the code travels the wire like any other definition field.
 
-**The code lives on the loomcycle host — like the [env-var mirror](#the-env-var-mirror) for MCP servers, the sensitive artifact never crosses the wire:**
+One host prerequisite: enable the provider with `LOOMCYCLE_CODE_AGENTS_ENABLED=1` (default off — operator-trust, same posture as the Bash tool; or registration is refused). Inline source is capped at ~256 KB. For reproducible runs, optionally `LOOMCYCLE_CODE_AGENTS_DETERMINISTIC=1`.
 
-1. Deploy the JavaScript to `agent_code/<name>/index.js` (under `LOOMCYCLE_CODE_AGENTS_ROOT`, default `./agent_code`) on the loomcycle deployment. `<name>` matches the Agent Definition name. loomcycle reads it from disk; **it is not uploaded through n8n.**
-2. Enable the provider on the host: `LOOMCYCLE_CODE_AGENTS_ENABLED=1` (default off — operator-trust, same posture as the Bash tool). For reproducible runs, optionally `LOOMCYCLE_CODE_AGENTS_DETERMINISTIC=1`.
-3. Register the definition from n8n (step above), then spawn it like any other agent.
+> **Filesystem fallback (still supported):** leave the JavaScript Code editor empty and loomcycle falls back to `agent_code/<name>/index.js` (under `LOOMCYCLE_CODE_AGENTS_ROOT`) on the host, where `<name>` matches the Agent Definition name. Inline `code_body` wins when both are present.
 
 ## Local development install
 
