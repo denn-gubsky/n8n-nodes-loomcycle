@@ -129,6 +129,40 @@ describe('LoomCycle resource=run', () => {
 			expect(arg.allowedTools).toEqual(['Memory', 'Channel', 'AgentDef']);
 		});
 
+		it('forwards metadata as a parsed object (v0.21)', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: { metadata: '{"repo":"org/proj","policy":"strict"}' },
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.runStreaming.mock.calls[0][0];
+			expect(arg.metadata).toEqual({ repo: 'org/proj', policy: 'strict' });
+		});
+
+		it('omits metadata when the JSON field is empty', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: { metadata: '{}' },
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.runStreaming.mock.calls[0][0];
+			expect(arg.metadata).toBeUndefined();
+		});
+
 		it('forwards webSearchFilter when set to "drop"', async () => {
 			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
 			const node = new LoomCycle();

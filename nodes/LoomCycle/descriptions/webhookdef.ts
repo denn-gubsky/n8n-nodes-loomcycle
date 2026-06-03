@@ -141,6 +141,63 @@ export const webhookDefOps: INodeProperties[] = [
 		description: 'Operator-visible description of this version. Helps audit the lineage later.',
 	},
 
+	// ---- Metadata (Create / Fork) ----
+	// loomcycle v0.21: STATIC, operator-authored (trusted) metadata folded
+	// into overlay.metadata → delivered as input.metadata (code-js) / a trusted
+	// prompt block (LLM). Distinct from REQUEST-SOURCED metadata, which the
+	// operator wires via payload_mapping `run_metadata.<name>` targets in the
+	// Advanced Overlay below (untrusted — fenced in a <run_metadata> block).
+	{
+		displayName: 'Metadata (JSON)',
+		name: 'metadata',
+		type: 'json',
+		default: '{}',
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create', 'fork'] } },
+		description:
+			'Static non-secret metadata (JSON object) passed to the spawned agent as TRUSTED (loomcycle ≥ v0.21) — code-js reads `input.metadata`, LLMs get a trusted prompt block. To instead source metadata from the inbound request, add `payload_mapping` entries with `run_metadata.&lt;name&gt;` targets in the Advanced Overlay (those arrive UNTRUSTED, fenced). Not for secrets — use Per-Delivery Credentials.',
+	},
+
+	// ---- Per-delivery credentials (Create / Fork) — ScheduleDef parity (v0.21) ----
+	// Template-string values only (e.g. ${LOOMCYCLE_FOO}); plaintext secrets
+	// never travel this wire path (CLAUDE.md §security). Folded into
+	// overlay.user_credentials, matching ScheduleDef's Per-Fire Credentials.
+	{
+		displayName: 'Per-Delivery Credentials',
+		name: 'userCredentials',
+		type: 'fixedCollection',
+		placeholder: 'Add Credential',
+		default: {},
+		typeOptions: { multipleValues: true },
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create', 'fork'] } },
+		options: [
+			{
+				name: 'credential',
+				displayName: 'Credential',
+				values: [
+					{
+						displayName: 'Name',
+						name: 'name',
+						type: 'string',
+						default: '',
+						required: true,
+						description: 'Credential key referenced by tools as `${run.credentials.&lt;name&gt;}`',
+					},
+					{
+						displayName: 'Value',
+						name: 'value',
+						type: 'string',
+						default: '',
+						required: true,
+						description:
+							'Template string only (e.g. `${LOOMCYCLE_GITHUB_TOKEN}`). Plaintext credentials never travel this wire path. A live per-delivery `user_credentials.&lt;name&gt;` in the payload mapping overrides this.',
+					},
+				],
+			},
+		],
+		description:
+			'Named credentials (RFC F) injected when the webhook spawns a run — parity with ScheduleDef (loomcycle ≥ v0.21). Template strings only. Folded into the overlay as `user_credentials`.',
+	},
+
 	// ---- Overlay JSON (Create = advanced; Fork = full diff) ----
 	{
 		displayName: 'Advanced Overlay (JSON)',
@@ -150,7 +207,7 @@ export const webhookDefOps: INodeProperties[] = [
 		typeOptions: { rows: 6 },
 		displayOptions: { show: { resource: ['webhookDef'], operation: ['create', 'fork'] } },
 		description:
-			'Nested webhook fields as JSON — `auth` ({kind, algorithm, header, signing_secret_env, bearer_token_env}), `rate_limit` ({requests_per_minute, burst}), `payload_mapping`, `sync_response` ({enabled, timeout_ms}). For Fork this is the diff merged onto the parent. The structured fields above (agent/channel/enabled) override matching keys here on Create.',
+			'Nested webhook fields as JSON — `auth` ({kind, algorithm, header, signing_secret_env, bearer_token_env}), `rate_limit` ({requests_per_minute, burst}), `payload_mapping` (map JSONPath → targets; `run_metadata.&lt;name&gt;` targets feed the agent UNTRUSTED request-sourced metadata; `user_credentials.&lt;name&gt;` targets feed per-delivery tokens), `sync_response` ({enabled, timeout_ms}). For Fork this is the diff merged onto the parent. The structured fields above (agent/channel/enabled, Metadata, Per-Delivery Credentials) override matching keys here on Create.',
 	},
 
 	// ---- Env-var hint notice (Create) ----
