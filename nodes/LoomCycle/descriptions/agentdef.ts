@@ -147,7 +147,7 @@ export const agentDefOps: INodeProperties[] = [
 				name: 'Code-JS (Deterministic JavaScript)',
 				value: 'code-js',
 				description:
-					'Synthetic provider — the agent runs operator-deployed JavaScript instead of an LLM (RFC J). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
+					'Synthetic provider — the agent runs inline JavaScript instead of an LLM (RFC J). Enter the code below; it is ingested via code_body (loomcycle ≥ v0.20). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
 			},
 			{
 				name: 'DeepSeek',
@@ -179,21 +179,37 @@ export const agentDefOps: INodeProperties[] = [
 			'Optional provider for this agent definition, folded into the overlay as `provider`. Providers are operator-defined in loomcycle.yaml; for any not listed, set `provider` in the Overlay JSON instead. The model still comes from the Overlay JSON (omit it for code-js).',
 	},
 
-	// ---- code-js deploy notice (Create / Fork, provider=code-js) ----
-	// code-js loads its JS from agent_code/<name>/index.js on the loomcycle
-	// host filesystem (operator-trust, like the Bash tool) — there is no
-	// wire path to upload code, so this node only registers the def row that
-	// points at it. Mirrors the MCP env-var-mirror notice pattern.
+	// ---- code-js JavaScript body (Create / Fork, provider=code-js) ----
+	// v0.20.0 (commit 1c896c2): code-js JS is ingested INLINE via
+	// overlay.code_body — no host filesystem bind. executeAgentDef folds this
+	// field into overlay.code_body. jsEditor (not codeNodeEditor) gives a plain
+	// JS editor WITHOUT n8n's $json/$input autocomplete, which would be
+	// misleading for loomcycle-runtime JS. Empty ⇒ loomcycle falls back to the
+	// host agent_code/<name>/index.js path (inline wins when present).
 	{
-		displayName: 'Deploy the JavaScript on the Loomcycle Host',
-		name: 'codeJsDeployNotice',
+		displayName: 'JavaScript Code',
+		name: 'code',
+		type: 'string',
+		typeOptions: { editor: 'jsEditor', rows: 12 },
+		default: '',
+		displayOptions: {
+			show: { resource: ['agentDef'], operation: ['create', 'fork'], agentProvider: ['code-js'] },
+		},
+		description:
+			'Inline JavaScript source for this code-js agent, ingested via `code_body` (loomcycle ≥ v0.20). It is compiled + content-hashed at registration. Leave empty to fall back to `agent_code/&lt;name&gt;/index.js` on the host.',
+	},
+
+	// ---- code-js gate reminder (Create / Fork, provider=code-js) ----
+	{
+		displayName: 'Requires Code Agents Enabled on Loomcycle',
+		name: 'codeJsNotice',
 		type: 'notice',
 		default: '',
 		displayOptions: {
 			show: { resource: ['agentDef'], operation: ['create', 'fork'], agentProvider: ['code-js'] },
 		},
 		description:
-			'Code-JS agents run operator-deployed JavaScript, not an LLM. Place this agent\'s code at `agent_code/&lt;name&gt;/index.js` (under LOOMCYCLE_CODE_AGENTS_ROOT) on the loomcycle host — loomcycle reads it from disk; it is NOT uploaded through n8n. This node only registers the definition that points at it. Requires `LOOMCYCLE_CODE_AGENTS_ENABLED=1` on the host; leave the model unset in the Overlay JSON.',
+			'The loomcycle host must run with `LOOMCYCLE_CODE_AGENTS_ENABLED=1` or registration is refused. Inline code is operator-trust (same posture as the Bash tool), compiled at create, and capped at ~256 KB. Leave the model unset in the Overlay JSON.',
 	},
 
 	// ---- Overlay JSON (Create / Fork) ----

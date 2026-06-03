@@ -411,13 +411,19 @@ async function executeAgentDef(
 	// Fold the Provider dropdown into the overlay. Empty = leave unset
 	// (provider stays whatever the Overlay JSON / loomcycle default supplies).
 	// A selected provider wins over any `provider` key in the Overlay JSON so
-	// the dropdown is authoritative. code-js marks a deterministic JS agent
-	// (RFC J) — its JavaScript is deployed host-side, not via this call.
+	// the dropdown is authoritative. When code-js is selected, the inline
+	// JavaScript editor folds into overlay.code_body — loomcycle ≥ v0.20
+	// ingests the source over the wire (no host filesystem bind); an empty
+	// body falls back to the host agent_code/<name>/index.js path.
 	if (operation === 'create' || operation === 'fork') {
 		const provider = ctx.getNodeParameter('agentProvider', i, '') as string;
 		if (provider) {
 			const overlay = (input.overlay ?? {}) as Record<string, unknown>;
 			overlay.provider = provider;
+			if (provider === 'code-js') {
+				const code = ctx.getNodeParameter('code', i, '') as string;
+				if (code) overlay.code_body = code;
+			}
 			input.overlay = overlay;
 		}
 	}
