@@ -22,6 +22,22 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 - **Metadata is a JSON-object field, not a name/value collection.** loomcycle types it as `Record<string, unknown>` (values may be nested/numbers), so a JSON field is the faithful surface — unlike the credentials maps, whose values are always template strings.
 - **Empty `{}` is omitted from the wire**, so existing Run/Schedule/Webhook payloads are byte-identical when the field is untouched. A shared `parseObjectField` helper strict-parses (malformed JSON → clear node error) and drops empty/non-object input.
 - **Static vs request-sourced webhook metadata stay distinct.** Static `metadata` is operator-authored and trusted; `run_metadata.*` payload-mapping targets are attacker-influenceable and delivered untrusted — the node keeps the trusted field structured and leaves the untrusted mapping to the Advanced Overlay, mirroring loomcycle's own split.
+## [2.4.0] — 2026-06-02
+
+**Minor release (full edition).** Surfaces loomcycle **v0.20** MCP dynamic-ingestion behaviour on the MCP Server node. Mirrors slim-edition 3.3.0.
+
+### Added
+
+- **`MCP Server → Register` / `Fork`: a "Discover Tools at Registration" toggle** (default on). loomcycle ≥ v0.20 runs the `tools/list` handshake at ingestion and returns a `discovered` count in the node output (best-effort — an unreachable peer still registers and self-heals). Folded to the wire as `discover` only when turned off, so existing Register payloads are unchanged.
+
+### Changed
+
+- **Field hints updated for v0.20 create-time behaviour:** the URL host is now allowlist-checked *at registration* (loopback/RFC1918 hosts need the private host allowlist); inner `${LOOMCYCLE_*}` header tokens are *expanded at registration*, so the env vars must exist on the deployment before Register; content-addressed re-registration is a no-op (`deduplicated: true`).
+
+### Notable design decisions
+
+- **`discover` is only sent when turned off.** True is the server default, so omitting it keeps the wire payload byte-identical to pre-v0.20 for the common case and avoids perturbing existing workflows.
+- **No `Ensure` operation.** The substrate already dedups create by `content_sha256`, so re-running Register is effectively idempotent; the explicit op-discriminated surface (8 ops) stays uniform rather than adding a parallel `ensureMcpServer` path.
 
 ## [2.3.0] — 2026-06-02
 
