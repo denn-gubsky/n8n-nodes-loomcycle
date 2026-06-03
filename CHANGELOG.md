@@ -2,6 +2,25 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-06-02
+
+**Minor release (full edition).** Inline authoring for loomcycle **code-js** agents (RFC J — deterministic JavaScript agents) on the existing Agent Definition node. Mirrors slim-edition 3.2.0. code-js is a synthetic *provider*, so it rides the existing `agentDef()` + Run lifecycle — no new node.
+
+### Added
+
+- **`Agent Definition → Create` / `Fork`: a Provider dropdown.** Anthropic / Code-JS / DeepSeek / OpenAI / Google Gemini / Ollama, plus a "Set via Overlay JSON" default that preserves the prior behaviour. The selected provider is folded into the definition overlay as `provider` and overrides any `provider` key set in the Overlay JSON.
+- **Inline JavaScript Code editor for code-js.** When **Code-JS** is selected, a `jsEditor` field appears; its source is folded into the overlay as `code_body` (loomcycle ≥ v0.20 — inline ingestion, no host filesystem bind). loomcycle compiles + content-hashes the code at registration. Empty editor ⇒ loomcycle falls back to the host `agent_code/<name>/index.js` path (inline wins when both are present). A gate notice reminds operators that the host needs `LOOMCYCLE_CODE_AGENTS_ENABLED=1` and that source is capped at ~256 KB.
+- **README `Code-JS agents` section** documenting inline authoring + the filesystem fallback.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.14.1` → `^0.20.0` — consumes the typed `AgentDefOverlay.code_body` surface (v0.19/0.20) and brings the bundled adapter current with v0.17 multi-tenant auth. All previously-consumed methods unchanged.
+
+### Notable design decisions
+
+- **Inline `code_body`, not a filesystem deploy reminder.** loomcycle v0.20 (commit `1c896c2`) added inline `code_body` ingestion via AgentDef — reversing the earlier filesystem-only constraint — so the node now ships a real JS editor. `jsEditor` (not `codeNodeEditor`) is used deliberately: it omits n8n's `$json`/`$input` autocomplete, which would mislead for loomcycle-runtime JS.
+- **`code_body` is only folded when the provider is `code-js`**, so a stale value in the editor can't leak onto an LLM agent definition.
+
 ## [1.2.0] — 2026-05-25
 
 **Minor release.** Closes the long-standing memory-writes gap + adds runtime channel admin CRUD. Both surfaces consume `@loomcycle/client@^0.11.5`'s newly-typed `setMemoryEntry` / `deleteMemoryEntry` / `createChannel` / `updateChannel` / `deleteChannel` methods.
