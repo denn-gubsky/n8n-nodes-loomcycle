@@ -129,6 +129,11 @@ async function executeRun(
 		const userCredentials = collectNameValuePairs(additionalFields.userCredentials, 'credential');
 		if (Object.keys(userCredentials).length > 0) runOpts.userCredentials = userCredentials;
 
+		// v0.21: non-secret structured metadata delivered to the agent
+		// (input.metadata for code-js; trusted prompt block for LLMs).
+		const metadata = parseObjectField(additionalFields.metadata, ctx.getNode());
+		if (metadata) runOpts.metadata = metadata;
+
 		const allowedTools = parseCsv(additionalFields.allowedTools as string);
 		if (allowedTools !== undefined) runOpts.allowedTools = allowedTools;
 		const allowedHosts = parseCsv(additionalFields.allowedHosts as string);
@@ -555,6 +560,12 @@ async function executeScheduleDef(
 		);
 		if (Object.keys(userCredentials).length > 0) overlay.user_credentials = userCredentials;
 
+		// v0.21: static non-secret metadata, delivered to the agent on each
+		// fire. Shared by Create and Fork (per-fork override is the canonical
+		// use). Structured field wins over any `metadata` key in the Fork JSON.
+		const metadata = parseObjectField(ctx.getNodeParameter('metadata', i, '{}'), ctx.getNode());
+		if (metadata) overlay.metadata = metadata;
+
 		if (Object.keys(overlay).length > 0) input.overlay = overlay;
 	}
 
@@ -616,6 +627,18 @@ async function executeWebhookDef(
 			if (channel) overlay.channel = channel;
 			overlay.enabled = enabled;
 		}
+
+		// v0.21: static (trusted) metadata + per-delivery credentials parity
+		// with ScheduleDef. Shared by Create and Fork; structured fields win
+		// over the same keys in the Advanced Overlay JSON. Request-SOURCED
+		// metadata (run_metadata.* payload_mapping) stays in the overlay JSON.
+		const metadata = parseObjectField(ctx.getNodeParameter('metadata', i, '{}'), ctx.getNode());
+		if (metadata) overlay.metadata = metadata;
+		const userCredentials = collectNameValuePairs(
+			ctx.getNodeParameter('userCredentials', i, {}),
+			'credential',
+		);
+		if (Object.keys(userCredentials).length > 0) overlay.user_credentials = userCredentials;
 
 		if (Object.keys(overlay).length > 0) input.overlay = overlay;
 	}
@@ -774,6 +797,25 @@ function parseCsv(raw: unknown): string[] | undefined {
 		.map((s) => s.trim())
 		.filter((s) => s.length > 0);
 	return items.length > 0 ? items : undefined;
+}
+
+/**
+ * Parse a JSON-object field (metadata blocks) into a plain object, or
+ * `undefined` when it's empty / absent. Strict-parses so malformed JSON
+ * surfaces as a clear node error rather than a silent string. Arrays and
+ * scalars are rejected (metadata is always a `{key: value}` map).
+ */
+function parseObjectField(
+	raw: unknown,
+	node: import('n8n-workflow').INode,
+): Record<string, unknown> | undefined {
+	if (raw === undefined || raw === null || raw === '') return undefined;
+	const parsed = parseJsonField(raw, { strict: true, node });
+	if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+		const obj = parsed as Record<string, unknown>;
+		return Object.keys(obj).length > 0 ? obj : undefined;
+	}
+	return undefined;
 }
 
 function parseJsonField(

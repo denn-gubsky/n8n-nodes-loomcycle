@@ -191,6 +191,21 @@ export const scheduleDefOps: INodeProperties[] = [
 			'Per-fire named credentials (RFC F) the scheduler injects when building each run. Template strings only — plaintext credentials never travel through this wire path.',
 	},
 
+	// ---- Metadata (Create / Fork) ----
+	// loomcycle v0.21: static non-secret metadata folded into overlay.metadata,
+	// delivered to the agent on each fire (input.metadata for code-js; trusted
+	// prompt block for LLMs). Per-fork override is the canonical use — e.g. a
+	// distinct `repo` per fork of one template.
+	{
+		displayName: 'Metadata (JSON)',
+		name: 'metadata',
+		type: 'json',
+		default: '{}',
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create', 'fork'] } },
+		description:
+			'Non-secret structured metadata (JSON object) passed to the agent on each scheduled fire (loomcycle ≥ v0.21). A code-js agent reads it as `input.metadata`; an LLM agent receives it as a trusted prompt block. Override per fork (e.g. a different `repo` per tenant). Not for secrets — use Per-Fire Credentials.',
+	},
+
 	// ---- Overlay JSON (Fork) — advanced field diff ----
 	{
 		displayName: 'Overlay (JSON)',
@@ -200,7 +215,7 @@ export const scheduleDefOps: INodeProperties[] = [
 		typeOptions: { rows: 6 },
 		displayOptions: { show: { resource: ['scheduleDef'], operation: ['fork'] } },
 		description:
-			'JSON diff merged onto the parent row (e.g. `{"schedule":"0 6 * * *","user_id":"u_42","user_tier":"high"}`). Per-Fire Credentials above are merged in as `user_credentials`.',
+			'JSON diff merged onto the parent row (e.g. `{"schedule":"0 6 * * *","user_id":"u_42","user_tier":"high"}`). Per-Fire Credentials above are merged in as `user_credentials`, and Metadata as `metadata`.',
 	},
 
 	// ---- Additional fields (Create) — advanced schedule knobs ----

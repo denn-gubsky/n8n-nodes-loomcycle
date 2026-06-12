@@ -1,6 +1,6 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle-full",
-	"version": "2.4.0",
+	"version": "2.5.0",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -80,7 +80,7 @@
 	},
 	"devDependencies": {
 		"@langchain/core": "^0.3.0",
-		"@loomcycle/client": "^0.20.0",
+		"@loomcycle/client": "^0.21.0",
 		"@types/node": "^20.14.0",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",
 		"@typescript-eslint/parser": "^7.18.0",

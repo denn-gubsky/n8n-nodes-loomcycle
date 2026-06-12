@@ -94,6 +94,26 @@ describe('LoomCycle resource=scheduleDef', () => {
 		expect(arg.overlay.user_credentials).toEqual({ slack: '${LOOMCYCLE_SLACK}' });
 	});
 
+	it('Create folds metadata into overlay.metadata (v0.21)', async () => {
+		mockClient.scheduleDef.mockResolvedValue({ def_id: 'sched_md' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'scheduleDef',
+				operation: 'create',
+				name: 's',
+				schedule: '0 * * * *',
+				agent: 'a',
+				prompt: 'go',
+				promote: true,
+				metadata: '{"repo":"org/proj"}',
+			},
+		});
+		await node.execute.call(ctx);
+		const arg = mockClient.scheduleDef.mock.calls[0][0];
+		expect(arg.overlay.metadata).toEqual({ repo: 'org/proj' });
+	});
+
 	it('Fork merges per-fire credentials onto the JSON overlay diff', async () => {
 		mockClient.scheduleDef.mockResolvedValue({ def_id: 'sched_fork' });
 		const node = new LoomCycle();
