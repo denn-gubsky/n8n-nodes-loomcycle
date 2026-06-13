@@ -30,10 +30,22 @@ export const runOps: INodeProperties[] = [
 				action: 'Cancel a run',
 			},
 			{
+				name: 'Compact',
+				value: 'compact',
+				description: 'Summarise a parked run\'s conversation to reclaim context (loomcycle ≥ v0.33)',
+				action: 'Compact a run',
+			},
+			{
 				name: 'Get Status',
 				value: 'getStatus',
 				description: 'Fetch the current state of a running or completed agent',
 				action: 'Get run status',
+			},
+			{
+				name: 'Get Transcript',
+				value: 'getTranscript',
+				description: 'Read the full event log for a session (system prompt + every turn)',
+				action: 'Get a session transcript',
 			},
 			{
 				name: 'List Agents',
@@ -46,6 +58,12 @@ export const runOps: INodeProperties[] = [
 				value: 'spawn',
 				description: 'Spawn a new loomcycle agent run and wait synchronously for completion',
 				action: 'Spawn a run',
+			},
+			{
+				name: 'Spawn Batch',
+				value: 'spawnBatch',
+				description: 'Fan-out: spawn up to 32 runs concurrently and wait for all to settle (loomcycle ≥ v0.33)',
+				action: 'Spawn a batch of runs',
 			},
 		],
 		default: 'spawn',
@@ -128,6 +146,17 @@ export const runOps: INodeProperties[] = [
 				description: 'Comma-separated tool-name list to narrow the agent\'s allowed_tools beyond the operator floor. Empty = no narrowing.',
 			},
 			{
+				// loomcycle v0.32: per-run context-compaction override. Each
+				// field optional; unset inherits the agent's value. Folded via
+				// parseObjectField onto runOpts.compaction.
+				displayName: 'Compaction (JSON)',
+				name: 'compaction',
+				type: 'json',
+				default: '{}',
+				description:
+					'Per-run context-compaction override (loomcycle ≥ v0.32), e.g. `{"enabled":true,"keepLastN":4,"autocompactAtPct":80}`. Keys: enabled, targetPercentage, keepLastN, keepFirst, autocompactAtPct, model. Empty = inherit the agent\'s settings.',
+			},
+			{
 				// loomcycle v0.21: non-secret structured metadata channel.
 				// Trusted (first-party bearer) — code-js reads input.metadata,
 				// LLM agents get a trusted prompt block. Per-call, not session
@@ -178,6 +207,26 @@ export const runOps: INodeProperties[] = [
 				description: 'Per-tool named credentials (RFC F) injected into MCP server headers per run. Template strings only.',
 			},
 			{
+				// loomcycle v0.21: per-run wall-clock ceiling. Precedence:
+				// per-run > per-agent > global. Folded only when > 0.
+				displayName: 'Run Timeout (Seconds)',
+				name: 'runTimeoutSeconds',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'Per-run wall-clock ceiling (loomcycle ≥ v0.21). 0 = inherit the agent / global default. Overrides both when > 0.',
+			},
+			{
+				// loomcycle v0.28: per-run sampling override. Folded via
+				// parseObjectField onto runOpts.sampling.
+				displayName: 'Sampling (JSON)',
+				name: 'sampling',
+				type: 'json',
+				default: '{}',
+				description:
+					'Per-run sampling override (loomcycle ≥ v0.28), e.g. `{"temperature":0.2,"topP":0.9,"seed":7}`. Keys: temperature, topP, topK, frequencyPenalty, presencePenalty, seed, stop. Empty = inherit the agent\'s settings.',
+			},
+			{
 				displayName: 'Session ID',
 				name: 'sessionId',
 				type: 'string',
@@ -219,14 +268,98 @@ export const runOps: INodeProperties[] = [
 		description: 'The agent_id of the run to inspect / cancel',
 	},
 
-	// ---- Cancel reason ----
+	// ---- Cancel / Compact reason ----
 	{
 		displayName: 'Reason',
 		name: 'reason',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['run'], operation: ['cancel'] } },
-		description: 'Operator-visible reason recorded with the cancellation',
+		displayOptions: { show: { resource: ['run'], operation: ['cancel', 'compact'] } },
+		description: 'Operator-visible reason recorded with the cancellation / compaction',
+	},
+
+	// ---- Compact: Run ID ----
+	{
+		displayName: 'Run ID',
+		name: 'runId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['run'], operation: ['compact'] } },
+		description: 'The run_id to compact (from a Spawn output). Summarises its conversation; reports before/after token counts + whether applied live, as a marker, or a no-op.',
+	},
+
+	// ---- Get Transcript: Session ID ----
+	{
+		displayName: 'Session ID',
+		name: 'sessionId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['run'], operation: ['getTranscript'] } },
+		description: 'The session_id whose full event log to return (from a Spawn output)',
+	},
+
+	// ---- Spawn Batch: the fan-out set + optional join deadline ----
+	{
+		displayName: 'Spawns',
+		name: 'batchSpawns',
+		type: 'fixedCollection',
+		placeholder: 'Add Spawn',
+		default: {},
+		required: true,
+		typeOptions: { multipleValues: true },
+		displayOptions: { show: { resource: ['run'], operation: ['spawnBatch'] } },
+		options: [
+			{
+				name: 'spawn',
+				displayName: 'Spawn',
+				values: [
+					{
+						displayName: 'Agent Name or ID',
+						name: 'agent',
+						type: 'options',
+						typeOptions: { loadOptionsMethod: 'loadAgents' },
+						default: '',
+						required: true,
+						description: 'Agent to spawn for this child run. Or specify a name via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+					},
+					{
+						displayName: 'Prompt',
+						name: 'prompt',
+						type: 'string',
+						typeOptions: { rows: 2 },
+						default: '',
+						required: true,
+						description: 'Prompt for this child run — wrapped as a trusted-text segment',
+					},
+					{
+						displayName: 'User ID',
+						name: 'userId',
+						type: 'string',
+						default: '',
+						description: 'Override the credential Default User ID for this child. Empty = credential default.',
+					},
+					{
+						displayName: 'User Tier',
+						name: 'userTier',
+						type: 'string',
+						default: '',
+						description: 'Override the credential Default User Tier for this child. Empty = credential default.',
+					},
+				],
+			},
+		],
+		description: 'Up to 32 child runs spawned concurrently. The node blocks until all settle; the result is index-aligned with this list (per-child failures reported in-envelope, never thrown).',
+	},
+	{
+		displayName: 'Join Timeout (Ms)',
+		name: 'batchTimeoutMs',
+		type: 'number',
+		default: 0,
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { resource: ['run'], operation: ['spawnBatch'] } },
+		description: 'Optional deadline: a child still running when it elapses is cancelled + reported as cancelled in the envelope. 0 = wait indefinitely.',
 	},
 
 	// ---- List Agents ----

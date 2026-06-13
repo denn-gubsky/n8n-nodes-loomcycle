@@ -2,6 +2,29 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] — 2026-06-13
+
+**Minor release.** Catches the package up to **loomcycle v0.34** (adapter `^0.21.0` → `^0.34.0`) by surfacing the ensemble + run-control surface that shipped across v0.25–v0.33. Phase 1 of a multi-phase catch-up — extends the existing Run + Channel nodes, no new node types.
+
+### Added
+
+- **`Run → Spawn Batch`** (`spawnRunBatch`, loomcycle ≥ v0.33) — fan-out up to 32 runs concurrently from one node; the node blocks until all settle and returns an index-aligned envelope (per-child failures reported in-envelope, never thrown).
+- **`Run → Compact`** (`compactRun`, ≥ v0.33) — summarise a parked run's conversation to reclaim context; reports before/after token counts + applied status (live / marker / no-op).
+- **`Run → Get Transcript`** (`getTranscript`) — read a session's full event log (system prompt + every turn).
+- **`Run → Spawn` Additional Fields: Sampling (JSON)** (`RunOptions.sampling`, ≥ v0.28), **Compaction (JSON)** (`RunOptions.compaction`, ≥ v0.32), **Run Timeout (Seconds)** (`RunOptions.runTimeoutSeconds`, ≥ v0.21) — per-run overrides; each inherits the agent's value when unset.
+- **`Channel → Await`** (`awaitChannels`, ≥ v0.25) — fan-in: wait until a predicate (any / all / at-least-N) is met across a set of channels; non-committing.
+- **`Channel → Broadcast`** (`broadcastChannels`, ≥ v0.25) — fan-out: publish the same payload to multiple channels atomically.
+- **`Channel → Purge`** (`purgeChannel`, ≥ v0.11.5) — clear a channel's buffered messages while keeping its definition + cursors; allowed on yaml channels too.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.21.0` → `^0.34.0`.
+
+### Notable design decisions
+
+- **Sampling / Compaction are JSON-object fields** folded via the shared `parseObjectField` helper (operator-authored JSON; the adapter + substrate validate the shapes), and omitted from the wire when empty — existing Spawn payloads stay byte-identical.
+- **Await / Broadcast take a comma-separated channel set** (max 32) distinct from the single-channel message ops, with a shared scope + scope_id; **Purge reuses the `loadChannels` dropdown** (not the runtime-only `channelName`) because it is valid on yaml channels.
+
 ## [3.4.0] — 2026-06-02
 
 **Minor release.** Surfaces loomcycle **v0.21** non-secret **metadata channel** — structured context delivered to the agent (a code-js agent reads `input.metadata`; an LLM agent gets a trusted prompt block). Adapter pinned `^0.21.0`.

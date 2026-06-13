@@ -2,11 +2,15 @@ import type { IDataObject, IExecuteFunctions, INodeExecutionData } from 'n8n-wor
 import { NodeOperationError } from 'n8n-workflow';
 import type {
 	AgentStatus,
+	AwaitChannelsOptions,
+	BroadcastChannelsOptions,
+	ChannelAwaitMode,
 	ChannelScope,
 	CreateChannelOptions,
 	HookFailMode,
 	HookPhase,
 	RegisterHookOptions,
+	RunBatchOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
 	SubstrateToolInput,
@@ -134,6 +138,19 @@ async function executeRun(
 		const metadata = parseObjectField(additionalFields.metadata, ctx.getNode());
 		if (metadata) runOpts.metadata = metadata;
 
+		// v0.28 / v0.32: per-run sampling + compaction overrides (operator-
+		// authored JSON; the adapter + substrate validate the shapes). Each
+		// inherits the agent's value when absent.
+		const sampling = parseObjectField(additionalFields.sampling, ctx.getNode());
+		if (sampling) runOpts.sampling = sampling as RunOptions['sampling'];
+		const compaction = parseObjectField(additionalFields.compaction, ctx.getNode());
+		if (compaction) runOpts.compaction = compaction as RunOptions['compaction'];
+
+		// v0.21: per-run wall-clock ceiling (precedence run > agent > global).
+		if (typeof additionalFields.runTimeoutSeconds === 'number' && additionalFields.runTimeoutSeconds > 0) {
+			runOpts.runTimeoutSeconds = additionalFields.runTimeoutSeconds;
+		}
+
 		const allowedTools = parseCsv(additionalFields.allowedTools as string);
 		if (allowedTools !== undefined) runOpts.allowedTools = allowedTools;
 		const allowedHosts = parseCsv(additionalFields.allowedHosts as string);
@@ -173,6 +190,48 @@ async function executeRun(
 		const opts = statusFilter ? { status: statusFilter as AgentStatus } : undefined;
 		const agents = await client.listUserAgents(userId, opts);
 		return { agents } as unknown as IDataObject;
+	}
+
+	if (operation === 'compact') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const reason = ctx.getNodeParameter('reason', i, '') as string;
+		const resp = await client.compactRun(runId, reason ? { reason } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'getTranscript') {
+		const sessionId = ctx.getNodeParameter('sessionId', i) as string;
+		const resp = await client.getTranscript(sessionId);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'spawnBatch') {
+		// Fan-out: assemble one RunOptions per row, falling each child back to
+		// the credential defaults like a single Spawn does. Per-child failures
+		// come back in-envelope (never thrown), so we return the raw result.
+		const rows = ctx.getNodeParameter('batchSpawns', i, {}) as IDataObject;
+		const spawnRows = Array.isArray(rows.spawn) ? (rows.spawn as IDataObject[]) : [];
+		if (spawnRows.length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'Spawn Batch requires at least one agent row.');
+		}
+		const credUserId = await getCredentialDefault(ctx, 'userId');
+		const credUserTier = await getCredentialDefault(ctx, 'userTier');
+		const spawns: RunOptions[] = spawnRows.map((row) => {
+			const ro: RunOptions = {
+				agent: row.agent as string,
+				segments: buildSegments((row.prompt as string) ?? '', false),
+			};
+			const uid = (row.userId as string) || credUserId;
+			const ut = (row.userTier as string) || credUserTier;
+			if (uid) ro.userId = uid;
+			if (ut) ro.userTier = ut;
+			return ro;
+		});
+		const batchOpts: RunBatchOptions = { spawns };
+		const timeoutMs = ctx.getNodeParameter('batchTimeoutMs', i, 0) as number;
+		if (timeoutMs > 0) batchOpts.timeoutMs = timeoutMs;
+		const resp = await client.spawnRunBatch(batchOpts);
+		return resp as unknown as IDataObject;
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown run operation: ${operation}`);
@@ -320,6 +379,58 @@ async function executeChannel(
 		await client.deleteChannel(name);
 		// Adapter returns void on success; surface a consistent ok envelope
 		return { ok: true, name } as IDataObject;
+	}
+
+	if (operation === 'purgeChannel') {
+		// Distinct from deleteChannel: clears buffered messages but keeps the
+		// definition + cursors. Allowed on yaml channels too, so it reads the
+		// loadChannels dropdown (`channel`), not the runtime-only channelName.
+		const name = ctx.getNodeParameter('channel', i) as string;
+		const resp = await client.purgeChannel(name);
+		return resp as unknown as IDataObject;
+	}
+
+	// Await / Broadcast (v0.25) operate over a SET of channels (max 32), with a
+	// shared scope + scope_id — distinct from the single-channel message ops.
+	if (operation === 'await' || operation === 'broadcast') {
+		const channels = parseCsv(ctx.getNodeParameter('channels', i, '') as string) ?? [];
+		if (channels.length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'At least one channel is required.');
+		}
+		const scope = ctx.getNodeParameter('scope', i, 'global') as ChannelScope;
+		const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+		const userId = scope === 'user' ? userIdParam || (await getCredentialDefault(ctx, 'userId')) : undefined;
+		if (scope === 'user' && !userId) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'User ID is required when Scope = User — set per-node or as a Default User ID on the credential.',
+			);
+		}
+
+		if (operation === 'await') {
+			const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
+			const opts: AwaitChannelsOptions = {
+				channels,
+				scope,
+				userId,
+				mode: ctx.getNodeParameter('awaitMode', i, 'any') as ChannelAwaitMode,
+			};
+			if (opts.mode === 'at_least') opts.n = ctx.getNodeParameter('awaitN', i, 1) as number;
+			if (additionalFields.fromCursor) opts.fromCursor = additionalFields.fromCursor as string;
+			if (typeof additionalFields.maxMessages === 'number') opts.maxMessages = additionalFields.maxMessages;
+			if (typeof additionalFields.waitMs === 'number') opts.waitMs = additionalFields.waitMs;
+			const resp = await client.awaitChannels(opts);
+			return resp as unknown as IDataObject;
+		}
+
+		// broadcast
+		const rawPayload = ctx.getNodeParameter('payload', i, '{}') as unknown;
+		const payload = parseJsonField(rawPayload, { strict: true, node: ctx.getNode() });
+		const deliverAt = ctx.getNodeParameter('deliverAt', i, '') as string;
+		const opts: BroadcastChannelsOptions = { channels, scope, userId, payload };
+		if (deliverAt) opts.deliverAt = deliverAt;
+		const resp = await client.broadcastChannels(opts);
+		return resp as unknown as IDataObject;
 	}
 
 	const channel = ctx.getNodeParameter('channel', i) as string;

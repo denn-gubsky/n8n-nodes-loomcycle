@@ -6,6 +6,9 @@ const { mockClient } = vi.hoisted(() => ({
 	mockClient: {
 		runStreaming: vi.fn(),
 		continueSession: vi.fn(),
+		spawnRunBatch: vi.fn(),
+		compactRun: vi.fn(),
+		getTranscript: vi.fn(),
 		getAgent: vi.fn(),
 		cancelAgent: vi.fn(),
 		listUserAgents: vi.fn(),
@@ -163,6 +166,42 @@ describe('LoomCycle resource=run', () => {
 			expect(arg.metadata).toBeUndefined();
 		});
 
+		it('folds sampling + compaction + runTimeoutSeconds (v0.28/v0.32/v0.21)', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: {
+						sampling: '{"temperature":0.2,"seed":7}',
+						compaction: '{"enabled":true,"keepLastN":4}',
+						runTimeoutSeconds: 120,
+					},
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.runStreaming.mock.calls[0][0];
+			expect(arg.sampling).toEqual({ temperature: 0.2, seed: 7 });
+			expect(arg.compaction).toEqual({ enabled: true, keepLastN: 4 });
+			expect(arg.runTimeoutSeconds).toBe(120);
+		});
+
+		it('omits sampling/compaction/runTimeoutSeconds when unset', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q', additionalFields: {} },
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.runStreaming.mock.calls[0][0];
+			expect(arg.sampling).toBeUndefined();
+			expect(arg.compaction).toBeUndefined();
+			expect(arg.runTimeoutSeconds).toBeUndefined();
+		});
+
 		it('forwards webSearchFilter when set to "drop"', async () => {
 			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
 			const node = new LoomCycle();
@@ -274,6 +313,90 @@ describe('LoomCycle resource=run', () => {
 			});
 			await node.execute.call(ctx);
 			expect(mockClient.listUserAgents).toHaveBeenCalledWith('u1', { status: 'running' });
+		});
+	});
+
+	describe('Compact', () => {
+		it('forwards runId + reason to compactRun', async () => {
+			mockClient.compactRun.mockResolvedValue({ run_id: 'r1', applied: 'live', before_tokens: 9000, after_tokens: 1200 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'compact', runId: 'r1', reason: 'pre-deploy' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.compactRun).toHaveBeenCalledWith('r1', { reason: 'pre-deploy' });
+		});
+
+		it('passes undefined opts when reason is empty', async () => {
+			mockClient.compactRun.mockResolvedValue({ run_id: 'r1', applied: 'noop' });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'compact', runId: 'r1' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.compactRun).toHaveBeenCalledWith('r1', undefined);
+		});
+	});
+
+	describe('Get Transcript', () => {
+		it('forwards sessionId to getTranscript', async () => {
+			mockClient.getTranscript.mockResolvedValue({ session: { id: 's1' }, events: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'getTranscript', sessionId: 's1' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.getTranscript).toHaveBeenCalledWith('s1');
+		});
+	});
+
+	describe('Spawn Batch', () => {
+		it('assembles RunOptions[] from rows + falls children back to credential defaults', async () => {
+			mockClient.spawnRunBatch.mockResolvedValue({ spawned: 2, results: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawnBatch',
+					batchSpawns: {
+						spawn: [
+							{ agent: 'researcher', prompt: 'find X', userId: 'u-row' },
+							{ agent: 'writer', prompt: 'draft Y' },
+						],
+					},
+					batchTimeoutMs: 30000,
+				},
+				credentials: { userTier: 'pro' },
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.spawnRunBatch.mock.calls[0][0];
+			expect(arg.timeoutMs).toBe(30000);
+			expect(arg.spawns).toHaveLength(2);
+			expect(arg.spawns[0].agent).toBe('researcher');
+			expect(arg.spawns[0].userId).toBe('u-row'); // row override
+			expect(arg.spawns[0].userTier).toBe('pro'); // credential default
+			expect(arg.spawns[0].segments[0].content[0].type).toBe('trusted-text');
+			expect(arg.spawns[1].agent).toBe('writer');
+		});
+
+		it('omits timeoutMs when 0 and throws on an empty batch', async () => {
+			mockClient.spawnRunBatch.mockResolvedValue({ spawned: 1, results: [] });
+			const node = new LoomCycle();
+			const ok = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawnBatch',
+					batchSpawns: { spawn: [{ agent: 'a', prompt: 'q' }] },
+					batchTimeoutMs: 0,
+				},
+			});
+			await node.execute.call(ok);
+			expect(mockClient.spawnRunBatch.mock.calls[0][0].timeoutMs).toBeUndefined();
+
+			const empty = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawnBatch', batchSpawns: {} },
+			});
+			await expect(node.execute.call(empty)).rejects.toBeInstanceOf(NodeOperationError);
 		});
 	});
 });
