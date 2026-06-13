@@ -10,6 +10,7 @@ import type {
 	HookFailMode,
 	HookPhase,
 	InterruptStatus,
+	CreateSnapshotOptions,
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
@@ -85,6 +86,8 @@ export async function executeLoomCycle(
 				row = await executeMemoryBackendDef(ctx, client, operation, i);
 			} else if (resource === 'operatorTokenDef') {
 				row = await executeOperatorTokenDef(ctx, client, operation, i);
+			} else if (resource === 'snapshot') {
+				row = await executeSnapshot(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -820,6 +823,77 @@ async function executeOperatorTokenDef(
 	const input = buildSubstrateInput(ctx, operation, i);
 	const resp = await client.operatorTokenDef(input);
 	return { result: resp } as IDataObject;
+}
+
+/**
+ * Runtime snapshot lifecycle (v0.8.17+) — backup / restore the substrate from
+ * n8n. Bespoke executor (not op-discriminated). exportUrl is synchronous (no
+ * HTTP call) and returns a bearer-authed download URL the caller fetches with
+ * the same Authorization header.
+ */
+async function executeSnapshot(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'create') {
+		const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const opts: CreateSnapshotOptions = {};
+		if (extra.label) opts.label = extra.label as string;
+		if (extra.includeHistory === true) opts.includeHistory = true;
+		if (extra.includeHistorySince) opts.includeHistorySince = extra.includeHistorySince as string;
+		if (typeof extra.maxBytes === 'number' && extra.maxBytes > 0) opts.maxBytes = extra.maxBytes;
+		const resp = await client.createSnapshot(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'list') {
+		const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const opts: { limit?: number; labelContains?: string } = {};
+		if (typeof extra.limit === 'number' && extra.limit > 0) opts.limit = extra.limit;
+		if (extra.labelContains) opts.labelContains = extra.labelContains as string;
+		const entries = await client.listSnapshots(opts);
+		return { entries } as unknown as IDataObject;
+	}
+
+	if (operation === 'get') {
+		const snapshotId = ctx.getNodeParameter('snapshotId', i) as string;
+		const resp = await client.getSnapshot(snapshotId);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'delete') {
+		const snapshotId = ctx.getNodeParameter('snapshotId', i) as string;
+		await client.deleteSnapshot(snapshotId);
+		// Adapter returns void on success; surface a consistent ok envelope.
+		return { ok: true, id: snapshotId } as IDataObject;
+	}
+
+	if (operation === 'exportUrl') {
+		const snapshotId = ctx.getNodeParameter('snapshotId', i) as string;
+		// Synchronous + side-effect-free: just builds the bearer-authed URL.
+		const url = client.exportSnapshotURL(snapshotId);
+		return { id: snapshotId, url } as IDataObject;
+	}
+
+	if (operation === 'restore') {
+		const restoreSource = ctx.getNodeParameter('restoreSource', i, 'byId') as string;
+		const includeHistory = ctx.getNodeParameter('includeHistory', i, false) as boolean;
+		const opts: { snapshotId?: string; json?: unknown; includeHistory?: boolean } = { includeHistory };
+		if (restoreSource === 'inline') {
+			opts.json = parseJsonField(ctx.getNodeParameter('restoreJson', i, '{}'), {
+				strict: true,
+				node: ctx.getNode(),
+			});
+		} else {
+			opts.snapshotId = ctx.getNodeParameter('snapshotId', i) as string;
+		}
+		const resp = await client.restoreSnapshot(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown snapshot operation: ${operation}`);
 }
 
 /**
