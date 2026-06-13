@@ -205,7 +205,7 @@ npm link
 cd ~/.n8n/nodes
 npm link @loomcycle/n8n-nodes-loomcycle
 
-# Then restart n8n. The 14 nodes appear under the "LoomCycle" prefix in
+# Then restart n8n. The 20 nodes appear under the "LoomCycle" prefix in
 # the node picker.
 ```
 
@@ -224,8 +224,18 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` | **v0.10.x** | enables n8n AI Agent's Chat Model slot to route through loomcycle |
 | Per-tool credentials (RFC F) + Schedule (RFC E) | **v0.12.x** | Schedule action node |
 | Inbound Webhooks (RFC H) + A2A (RFC G) | **v0.14.x** | Webhook + A2A Agent / A2A Server Card action nodes |
+| Memory Backend (RFC I) | **v0.15** | Memory Backend action node |
+| Interruption (human-in-the-loop) | **v0.8.16** | Interruption node + Interrupt Pending trigger; resolve needs the consumer-MCP backend |
+| Snapshot backup / restore | **v0.8.17** | Snapshot action node |
+| Operator Token (RFC L multi-tenant auth) | **v0.17** | Operator Token node (get/list/retire); `/v1/_me` credential test |
+| Inline code-js `code_body` + MCP tool auto-discovery | **v0.20** | Agent Definition JS editor; MCP Server discover toggle |
+| Non-secret metadata channel | **v0.21** | Metadata (JSON) on Run / Schedule / Webhook |
+| Channel fan-in / fan-out (RFC S) | **v0.25** | Channel Await / Broadcast |
+| Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
+| Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
+| Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
 
-If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
+The package targets `@loomcycle/client@^0.34.0`; basic Run / Memory / Channel ops still work on much older substrates. If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
 ### n8n version compatibility
 
@@ -236,7 +246,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` (bundled, not a runtime dependency)
 
-`@loomcycle/client` (`^0.14.1`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
+`@loomcycle/client` (`^0.34.0`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
 
 ### Verified deployments
 
