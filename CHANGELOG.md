@@ -2,6 +2,19 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] — 2026-06-13
+
+**Minor release.** Substrate-admin parity for two more definition families. Phase 4 of the v0.34 catch-up. **17 → 19 nodes** (15 action + 3 trigger + 1 sub-node).
+
+### Added
+
+- **LoomCycle Memory Backend node** (`memoryBackendDef`, RFC I, loomcycle ≥ v0.15) — 5 ops (Create / Fork / Get / List Versions / Retire) over pluggable memory backends (in-process or external REST store + ranker); the backend body rides the overlay JSON, same op-discriminated pattern as AgentDef.
+- **LoomCycle Operator Token node** (`operatorTokenDef`, RFC L, loomcycle ≥ v0.17) — **Get / List / Retire only**.
+
+### Notable design decisions
+
+- **Operator Token deliberately omits `create` / `rotate`** (CLAUDE.md §6). The substrate returns the token plaintext once on mint/rotate; surfacing that here would persist a live bearer into n8n execution data. The node exposes only the non-secret lifecycle, shows an in-node notice directing mint/rotate to the loomcycle Web UI / CLI, and the executor refuses `create`/`rotate` defence-in-depth (so an injected op value can't reach the wire). A unit test locks the absence of those ops.
+
 ## [3.7.0] — 2026-06-13
 
 **Minor release.** Direct LLM-gateway access (loomcycle ≥ v0.11) as a workflow step. Phase 3 of the v0.34 catch-up. **16 → 17 nodes** (13 action + 3 trigger + 1 sub-node).
