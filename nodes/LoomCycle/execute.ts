@@ -10,6 +10,9 @@ import type {
 	HookFailMode,
 	HookPhase,
 	InterruptStatus,
+	LLMChatMessage,
+	LLMChatOptions,
+	LLMEmbeddingsOptions,
 	RegisterHookOptions,
 	RunBatchOptions,
 	RunOptions,
@@ -76,6 +79,8 @@ export async function executeLoomCycle(
 				row = await executeHook(ctx, client, operation, i);
 			} else if (resource === 'interruption') {
 				row = await executeInterruption(ctx, client, operation, i);
+			} else if (resource === 'llm') {
+				row = await executeLlm(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -867,6 +872,66 @@ async function executeInterruption(
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown interruption operation: ${operation}`);
+}
+
+/**
+ * Direct LLM-gateway calls (v0.11.0) as a workflow step — chat completion +
+ * embeddings — without the agent loop. Distinct from the Chat Model cluster
+ * sub-node (which feeds an AI Agent); this is for RAG / embedding pipelines.
+ */
+async function executeLlm(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'chat') {
+		const rows = ctx.getNodeParameter('messages', i, {}) as IDataObject;
+		const messageRows = Array.isArray(rows.message) ? (rows.message as IDataObject[]) : [];
+		if (messageRows.length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'Chat requires at least one message.');
+		}
+		const messages: LLMChatMessage[] = messageRows.map((row) => ({
+			role: (row.role as LLMChatMessage['role']) ?? 'user',
+			content: (row.content as string) ?? '',
+		}));
+
+		const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const opts: LLMChatOptions = { messages };
+		if (typeof extra.maxTokens === 'number') opts.max_tokens = extra.maxTokens;
+		if (typeof extra.temperature === 'number') opts.temperature = extra.temperature;
+		if (extra.provider) opts.provider = extra.provider as string;
+		if (extra.model) opts.model = extra.model as string;
+		if (extra.tier) opts.tier = extra.tier as string;
+		const userId = (extra.userId as string) || (await getCredentialDefault(ctx, 'userId'));
+		if (userId) opts.user_id = userId;
+		if (extra.userTier) opts.user_tier = extra.userTier as string;
+
+		const resp = await client.llmChat(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'embeddings') {
+		const model = ctx.getNodeParameter('model', i) as string;
+		const rawInput = ctx.getNodeParameter('input', i) as string;
+		const splitLines = ctx.getNodeParameter('splitLines', i, false) as boolean;
+		// One vector for the whole field by default; with splitLines, each
+		// non-empty line is a separate input (string[]).
+		const input: string | string[] = splitLines
+			? rawInput.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+			: rawInput;
+
+		const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
+		const opts: LLMEmbeddingsOptions = { model, input };
+		if (extra.encodingFormat === 'base64') opts.encoding_format = 'base64';
+		if (typeof extra.dimensions === 'number' && extra.dimensions > 0) opts.dimensions = extra.dimensions;
+		if (extra.user) opts.user = extra.user as string;
+
+		const resp = await client.embeddings(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown llm operation: ${operation}`);
 }
 
 /**
