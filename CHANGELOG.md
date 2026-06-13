@@ -2,6 +2,21 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-06-13
+
+**Minor release (full edition).** Human-in-the-loop over loomcycle's `Interruption.ask` (loomcycle ≥ v0.8.16). Mirrors slim-edition 3.6.0. Phase 2 of the v0.34 catch-up. **18 → 20 nodes**.
+
+### Added
+
+- **LoomCycle Interruption action node** (3 ops): **List for User** (`listUserInterrupts`), **List for Run** (`listRunInterrupts`), **Resolve** (`resolveInterrupt` — posts a human's answer; validated against the ask's options when present).
+- **LoomCycle: Interrupt Pending trigger** — polls `listUserInterrupts(status: 'pending')` for a user and emits each newly-seen ask (deduped by `interrupt_id` in workflow static data).
+- **README `Human-in-the-loop` section** documenting the ask → human → resolve loop.
+
+### Notable design decisions
+
+- **The trigger + node form a closed loop** the way n8n excels at: the Interrupt Pending trigger surfaces an agent's question, a human answers it in n8n (Slack / email / form), and Interruption → Resolve unblocks the parked run. Requires loomcycle's consumer-MCP interruption backend to accept an external resolver.
+- **Dedup keys off `interrupt_id`** so an ask emits exactly once even though it stays `pending` across poll ticks until resolved.
+
 ## [2.6.0] — 2026-06-13
 
 **Minor release (full edition).** Catches the package up to **loomcycle v0.34** (adapter `^0.21.0` → `^0.34.0`) by surfacing the ensemble + run-control surface that shipped across v0.25–v0.33. Mirrors slim-edition 3.5.0. Phase 1 of a multi-phase catch-up — extends the existing Run + Channel nodes, no new node types.
