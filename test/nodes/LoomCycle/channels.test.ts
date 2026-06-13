@@ -22,6 +22,9 @@ const { mockClient } = vi.hoisted(() => ({
 		createChannel: vi.fn(),
 		updateChannel: vi.fn(),
 		deleteChannel: vi.fn(),
+		purgeChannel: vi.fn(),
+		awaitChannels: vi.fn(),
+		broadcastChannels: vi.fn(),
 		health: vi.fn(),
 	},
 }));
@@ -314,6 +317,79 @@ describe('LoomCycle resource=channel', () => {
 			const result = await node.execute.call(ctx);
 			expect(mockClient.deleteChannel).toHaveBeenCalledWith('doomed-channel');
 			expect(result[0][0].json).toMatchObject({ ok: true, name: 'doomed-channel' });
+		});
+	});
+
+	// ---- v0.25 fan-in / fan-out + v0.11.5 purge ----
+
+	describe('Purge Channel', () => {
+		it('purges by the loadChannels `channel` param (yaml channels allowed)', async () => {
+			mockClient.purgeChannel.mockResolvedValue({ purged: 12 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'channel', operation: 'purgeChannel', channel: 'events' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.purgeChannel).toHaveBeenCalledWith('events');
+		});
+	});
+
+	describe('Await', () => {
+		it('parses channels CSV + forwards mode/n + await additionalFields', async () => {
+			mockClient.awaitChannels.mockResolvedValue({ satisfied: true, timed_out: false, fired: ['orders'], results: {} });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'channel',
+					operation: 'await',
+					channels: 'orders, alerts ,audit',
+					scope: 'global',
+					awaitMode: 'at_least',
+					awaitN: 2,
+					additionalFields: { waitMs: 5000 },
+				},
+			});
+			await node.execute.call(ctx);
+			const opts = mockClient.awaitChannels.mock.calls[0][0];
+			expect(opts.channels).toEqual(['orders', 'alerts', 'audit']);
+			expect(opts.mode).toBe('at_least');
+			expect(opts.n).toBe(2);
+			expect(opts.waitMs).toBe(5000);
+		});
+
+		it('omits n for non-at_least modes and throws on empty channels', async () => {
+			mockClient.awaitChannels.mockResolvedValue({ satisfied: false, timed_out: true, fired: [], results: {} });
+			const node = new LoomCycle();
+			const ok = makeExecuteContext({
+				params: { resource: 'channel', operation: 'await', channels: 'orders', scope: 'global', awaitMode: 'any' },
+			});
+			await node.execute.call(ok);
+			expect(mockClient.awaitChannels.mock.calls[0][0].n).toBeUndefined();
+
+			const empty = makeExecuteContext({
+				params: { resource: 'channel', operation: 'await', channels: '', scope: 'global', awaitMode: 'any' },
+			});
+			await expect(node.execute.call(empty)).rejects.toBeInstanceOf(NodeOperationError);
+		});
+	});
+
+	describe('Broadcast', () => {
+		it('fans the parsed payload out to the channel set', async () => {
+			mockClient.broadcastChannels.mockResolvedValue({ results: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'channel',
+					operation: 'broadcast',
+					channels: 'a,b',
+					scope: 'global',
+					payload: '{"event":"deploy"}',
+				},
+			});
+			await node.execute.call(ctx);
+			const opts = mockClient.broadcastChannels.mock.calls[0][0];
+			expect(opts.channels).toEqual(['a', 'b']);
+			expect(opts.payload).toEqual({ event: 'deploy' });
 		});
 	});
 });

@@ -2,6 +2,29 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-06-13
+
+**Minor release (full edition).** Catches the package up to **loomcycle v0.34** (adapter `^0.21.0` → `^0.34.0`) by surfacing the ensemble + run-control surface that shipped across v0.25–v0.33. Mirrors slim-edition 3.5.0. Phase 1 of a multi-phase catch-up — extends the existing Run + Channel nodes, no new node types.
+
+### Added
+
+- **`Run → Spawn Batch`** (`spawnRunBatch`, loomcycle ≥ v0.33) — fan-out up to 32 runs concurrently; index-aligned envelope (per-child failures in-envelope, never thrown).
+- **`Run → Compact`** (`compactRun`, ≥ v0.33) — summarise a parked run's conversation; reports before/after tokens + applied status.
+- **`Run → Get Transcript`** (`getTranscript`) — full session event log.
+- **`Run → Spawn` Additional Fields: Sampling (JSON)** (≥ v0.28), **Compaction (JSON)** (≥ v0.32), **Run Timeout (Seconds)** (≥ v0.21) — per-run overrides; inherit the agent's value when unset.
+- **`Channel → Await`** (`awaitChannels`, ≥ v0.25) — fan-in across a channel set (any / all / at-least-N); non-committing.
+- **`Channel → Broadcast`** (`broadcastChannels`, ≥ v0.25) — fan-out: same payload to multiple channels atomically.
+- **`Channel → Purge`** (`purgeChannel`, ≥ v0.11.5) — clear buffered messages; allowed on yaml channels too.
+
+### Changed
+
+- **Adapter pin bump:** `@loomcycle/client` `^0.21.0` → `^0.34.0`.
+
+### Notable design decisions
+
+- **Sampling / Compaction are JSON-object fields** folded via the shared `parseObjectField` helper, omitted from the wire when empty — existing Spawn payloads stay byte-identical.
+- **Await / Broadcast take a comma-separated channel set** (max 32); **Purge reuses the `loadChannels` dropdown** because it is valid on yaml channels.
+
 ## [2.5.0] — 2026-06-02
 
 **Minor release (full edition).** Surfaces loomcycle **v0.21** non-secret **metadata channel** — structured context delivered to the agent (a code-js agent reads `input.metadata`; an LLM agent gets a trusted prompt block). Mirrors slim-edition 3.4.0. Adapter pinned `^0.21.0`.
