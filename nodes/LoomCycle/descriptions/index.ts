@@ -13,3 +13,4 @@ export { interruptionOps } from './interruption';
 export { llmOps } from './llm';
 export { memoryBackendDefOps } from './memorybackenddef';
 export { operatorTokenDefOps } from './operatortokendef';
+export { snapshotOps } from './snapshot';
