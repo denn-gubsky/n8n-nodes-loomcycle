@@ -11,3 +11,5 @@ export { a2aAgentDefOps } from './a2aagentdef';
 export { a2aServerCardDefOps } from './a2aservercarddef';
 export { interruptionOps } from './interruption';
 export { llmOps } from './llm';
+export { memoryBackendDefOps } from './memorybackenddef';
+export { operatorTokenDefOps } from './operatortokendef';

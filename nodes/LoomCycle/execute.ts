@@ -81,6 +81,10 @@ export async function executeLoomCycle(
 				row = await executeInterruption(ctx, client, operation, i);
 			} else if (resource === 'llm') {
 				row = await executeLlm(ctx, client, operation, i);
+			} else if (resource === 'memoryBackendDef') {
+				row = await executeMemoryBackendDef(ctx, client, operation, i);
+			} else if (resource === 'operatorTokenDef') {
+				row = await executeOperatorTokenDef(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -775,6 +779,46 @@ async function executeA2aServerCardDef(
 ): Promise<IDataObject> {
 	const input = buildSubstrateInput(ctx, operation, i);
 	const resp = await client.a2aServerCardDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * Pluggable memory-backend admin (RFC I, v0.15). Generic op-discriminated
+ * def-admin (backend body rides the overlay JSON), so it reuses
+ * buildSubstrateInput like AgentDef.
+ */
+async function executeMemoryBackendDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.memoryBackendDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * OperatorTokenDef admin (RFC L, v0.17). The node only exposes get/list/retire
+ * (descriptions/operatortokendef.ts) — create/rotate return the token plaintext
+ * and are deliberately omitted so a live bearer never lands in n8n execution
+ * data (CLAUDE.md §6). Defence-in-depth: refuse create/rotate here too, in case
+ * an operation value is injected via an expression.
+ */
+async function executeOperatorTokenDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'create' || operation === 'rotate') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`Operator token ${operation} is not supported from n8n — it returns the token secret, which must not enter execution data. Mint / rotate via the loomcycle Web UI or CLI.`,
+		);
+	}
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.operatorTokenDef(input);
 	return { result: resp } as IDataObject;
 }
 
