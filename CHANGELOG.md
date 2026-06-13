@@ -2,6 +2,21 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] — 2026-06-13
+
+**Minor release (full edition).** Direct LLM-gateway access (loomcycle ≥ v0.11) as a workflow step. Mirrors slim-edition 3.7.0. Phase 3 of the v0.34 catch-up. **20 → 21 nodes**.
+
+### Added
+
+- **LoomCycle LLM action node** (2 ops):
+  - **Chat** (`llmChat`) — non-streaming completion through the gateway: build a message list (role + content rows), optional routing (`provider` / `model` / `tier`) + sampling (`max_tokens` / `temperature`) + per-user quota (`user_id` / `user_tier`, with credential fallback). Provider routing + auth + retry are handled substrate-side; no agent loop.
+  - **Embeddings** (`embeddings`) — OpenAI-compatible vectors via the operator-configured embedder. One vector for the whole Input by default; a **Split Into Lines** toggle batches each non-empty line. Optional `encoding_format` / `dimensions` / `user`.
+
+### Notable design decisions
+
+- **Distinct from the Chat Model cluster sub-node.** The sub-node feeds an n8n AI Agent (LangChain-shaped, `supplyData`); this action node calls the gateway directly so RAG / embedding pipelines can get a completion or a vector as a plain workflow step.
+- **Embeddings input defaults to a single text** (one vector); the Split-Into-Lines toggle is opt-in so a multi-line document isn't silently split per line.
+
 ## [2.7.0] — 2026-06-13
 
 **Minor release (full edition).** Human-in-the-loop over loomcycle's `Interruption.ask` (loomcycle ≥ v0.8.16). Mirrors slim-edition 3.6.0. Phase 2 of the v0.34 catch-up. **18 → 20 nodes**.
