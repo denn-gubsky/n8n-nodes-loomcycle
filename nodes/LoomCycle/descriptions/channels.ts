@@ -42,6 +42,18 @@ export const channelOps: INodeProperties[] = [
 				action: 'Ack a channel cursor',
 			},
 			{
+				name: 'Await',
+				value: 'await',
+				description: 'Fan-in: wait until a predicate (any / all / at least N) is met across multiple channels (loomcycle ≥ v0.25)',
+				action: 'Await across channels',
+			},
+			{
+				name: 'Broadcast',
+				value: 'broadcast',
+				description: 'Fan-out: publish the same payload to multiple channels atomically (loomcycle ≥ v0.25)',
+				action: 'Broadcast to channels',
+			},
+			{
 				name: 'Create Channel',
 				value: 'createChannel',
 				description: 'Create a runtime-substrate channel. Yaml-declared channels refuse with HTTP 409.',
@@ -72,6 +84,12 @@ export const channelOps: INodeProperties[] = [
 				action: 'Publish to a channel',
 			},
 			{
+				name: 'Purge Channel',
+				value: 'purgeChannel',
+				description: 'Clear all buffered messages from a channel, keeping its definition + cursors. Allowed on yaml channels too.',
+				action: 'Purge a channel',
+			},
+			{
 				name: 'Subscribe',
 				value: 'subscribe',
 				description: 'Long-poll for the next message batch and auto-advance the cursor',
@@ -96,20 +114,32 @@ export const channelOps: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack'] },
+			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'purgeChannel'] },
 		},
 		description:
 			'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 	},
 
-	// ---- Scope (Publish / Subscribe / Peek / Ack) ----
+	// ---- Channels list (Await / Broadcast — fan-in / fan-out, comma-separated) ----
+	{
+		displayName: 'Channels (Comma-Separated)',
+		name: 'channels',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'orders, alerts, audit',
+		displayOptions: { show: { resource: ['channel'], operation: ['await', 'broadcast'] } },
+		description: 'Comma-separated channel names. Max 32. Await fans in across them; Broadcast publishes the same payload to all (atomic at the declare pre-flight).',
+	},
+
+	// ---- Scope (Publish / Subscribe / Peek / Ack / Await / Broadcast) ----
 	{
 		displayName: 'Scope',
 		name: 'scope',
 		type: 'options',
 		default: 'global',
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack'] },
+			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast'] },
 		},
 		options: [
 			{ name: 'Global (Admin)', value: 'global', description: 'Admin-scoped channel — single global queue' },
@@ -118,16 +148,40 @@ export const channelOps: INodeProperties[] = [
 		description: 'Whether the channel operates at the admin (global) or per-user scope',
 	},
 
-	// ---- User ID (Publish / Subscribe / Peek / Ack when scope=user) ----
+	// ---- User ID (per-user scope) ----
 	{
 		displayName: 'User ID',
 		name: 'userId',
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack'], scope: ['user'] },
+			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast'], scope: ['user'] },
 		},
 		description: 'User_id for the per-user scope. Empty = use the credential\'s Default User ID.',
+	},
+
+	// ---- Await: predicate mode + threshold ----
+	{
+		displayName: 'Mode',
+		name: 'awaitMode',
+		type: 'options',
+		default: 'any',
+		displayOptions: { show: { resource: ['channel'], operation: ['await'] } },
+		options: [
+			{ name: 'Any', value: 'any', description: 'Fire as soon as ANY channel has a message' },
+			{ name: 'All', value: 'all', description: 'Fire when EVERY channel has at least one message' },
+			{ name: 'At Least N', value: 'at_least', description: 'Fire when at least N of the channels have a message' },
+		],
+		description: 'Fan-in predicate. Non-committing — the cursor is never advanced.',
+	},
+	{
+		displayName: 'N (At Least)',
+		name: 'awaitN',
+		type: 'number',
+		default: 1,
+		typeOptions: { minValue: 1 },
+		displayOptions: { show: { resource: ['channel'], operation: ['await'], awaitMode: ['at_least'] } },
+		description: 'Number of channels that must have a message before the predicate fires',
 	},
 
 	// ---- Publish: payload + optional deliver_at ----
@@ -137,15 +191,15 @@ export const channelOps: INodeProperties[] = [
 		type: 'json',
 		default: '{}',
 		required: true,
-		displayOptions: { show: { resource: ['channel'], operation: ['publish'] } },
-		description: 'JSON payload to publish — the substrate stores it verbatim',
+		displayOptions: { show: { resource: ['channel'], operation: ['publish', 'broadcast'] } },
+		description: 'JSON payload to publish — the substrate stores it verbatim. For Broadcast it is published to every listed channel.',
 	},
 	{
 		displayName: 'Deliver At',
 		name: 'deliverAt',
 		type: 'dateTime',
 		default: '',
-		displayOptions: { show: { resource: ['channel'], operation: ['publish'] } },
+		displayOptions: { show: { resource: ['channel'], operation: ['publish', 'broadcast'] } },
 		description: 'Optional deferred-delivery timestamp (ISO 8601). Empty = deliver immediately.',
 	},
 
@@ -156,14 +210,14 @@ export const channelOps: INodeProperties[] = [
 		type: 'collection',
 		placeholder: 'Add Field',
 		default: {},
-		displayOptions: { show: { resource: ['channel'], operation: ['subscribe', 'peek'] } },
+		displayOptions: { show: { resource: ['channel'], operation: ['subscribe', 'peek', 'await'] } },
 		options: [
 			{
 				displayName: 'From Cursor',
 				name: 'fromCursor',
 				type: 'string',
 				default: '',
-				description: 'Resume reading from this cursor. Empty = use the committed cursor (Subscribe) or start of queue (Peek).',
+				description: 'Resume reading from this cursor. Empty = use the committed cursor (Subscribe) or start of queue (Peek / Await).',
 			},
 			{
 				displayName: 'Max Messages',
@@ -174,12 +228,12 @@ export const channelOps: INodeProperties[] = [
 				description: 'Maximum number of messages to return in this call',
 			},
 			{
-				displayName: 'Wait Ms (Subscribe Only)',
+				displayName: 'Wait Ms (Subscribe / Await)',
 				name: 'waitMs',
 				type: 'number',
 				default: 0,
 				typeOptions: { minValue: 0, maxValue: 60000 },
-				description: 'Subscribe long-poll wait if the queue is empty. Ignored for Peek.',
+				description: 'Long-poll wait if the predicate is unmet (Subscribe / Await). Ignored for Peek.',
 			},
 		],
 	},
