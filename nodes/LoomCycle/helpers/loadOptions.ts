@@ -139,6 +139,29 @@ export async function loadChannels(this: ILoadOptionsFunctions): Promise<INodePr
 }
 
 /**
+ * List captured snapshots via GET /v1/_snapshots (loomcycle v0.8.18). Backs
+ * the Get / Restore / Delete / Export-URL dropdowns on the Snapshot node. The
+ * option label is the snapshot's `label` (falling back to its id) plus the id,
+ * so operators can tell labelled backups apart.
+ */
+export async function loadSnapshots(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const entries = await client.listSnapshots({ limit: 200 });
+		if (entries.length === 0) {
+			return [{ name: '— no snapshots captured yet; create one or type an ID manually —', value: '' }];
+		}
+		return entries.map((s) => ({
+			name: s.label ? `${s.label} (${s.id})` : s.id,
+			value: s.id,
+			description: `${s.created_at} · ${s.byte_size} bytes`,
+		}));
+	} catch (err) {
+		return [failedToLoadOption('snapshots', err)];
+	}
+}
+
+/**
  * List known Memory scopes via GET /v1/_memory/scopes.
  */
 export async function loadMemoryScopes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {

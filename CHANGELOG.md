@@ -2,6 +2,25 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] — 2026-06-13
+
+**Minor release (full edition).** Runtime snapshot backup / restore from n8n. Mirrors slim-edition 3.9.0. Phase 5 (final) of the v0.34 catch-up. **23 → 24 nodes**.
+
+### Added
+
+- **LoomCycle Snapshot node** (loomcycle ≥ v0.8.17) — 6 ops:
+  - **Create** (`createSnapshot`) — label / include-history / max-bytes options.
+  - **List** (`listSnapshots`) — limit + label-contains filters; a `loadSnapshots` dropdown backs the id-taking ops.
+  - **Get** (`getSnapshot`) — full envelope incl. `json_content`.
+  - **Restore** (`restoreSnapshot`) — from a stored snapshot ID **or** an inline envelope JSON, with an optional interaction-history toggle.
+  - **Delete** (`deleteSnapshot`) — idempotent.
+  - **Export URL** (`exportSnapshotURL`) — synchronous; returns the bearer-authed download URL (no HTTP call).
+
+### Notable design decisions
+
+- **Restore offers a source toggle** (Snapshot ID vs Inline Envelope) so an envelope captured on another instance (or fetched via Get) can be restored directly, matching the adapter's `{snapshotId? | json?}` shape.
+- **This completes the loomcycle v0.34 catch-up** (Phases 1–5) on the full edition: run control + ensemble channels, human-in-the-loop, the LLM gateway, all eight definition families, and snapshot backup/restore.
+
 ## [2.9.0] — 2026-06-13
 
 **Minor release (full edition).** Substrate-admin parity for two more definition families. Mirrors slim-edition 3.8.0. Phase 4 of the v0.34 catch-up. **21 → 23 nodes**.
