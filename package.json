@@ -1,10 +1,10 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "3.5.0",
+	"version": "3.6.0",
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 14 nodes — 11 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card), 2 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x).",
+	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 16 nodes — 12 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card, Interruption), 3 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -63,8 +63,10 @@
 			"dist/nodes/LoomCycleWebhook/LoomCycleWebhook.node.js",
 			"dist/nodes/LoomCycleA2aAgent/LoomCycleA2aAgent.node.js",
 			"dist/nodes/LoomCycleA2aServerCard/LoomCycleA2aServerCard.node.js",
+			"dist/nodes/LoomCycleInterruption/LoomCycleInterruption.node.js",
 			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
 			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js",
+			"dist/nodes/LoomCycleInterruptPending/LoomCycleInterruptPending.node.js",
 			"dist/nodes/LoomCycleChatModel/LoomCycleChatModel.node.js"
 		]
 	},

@@ -20,7 +20,7 @@ This repo ships **two parallel packages** from **two branches**. Pick by where y
 |---|---|---|
 | npm | [`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle) | [`@loomcycle/n8n-nodes-loomcycle-full`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle-full) |
 | branch | [`main`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/main) | [`full-edition`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/full-edition) |
-| nodes | **14** | **18** |
+| nodes | **16** | **20** |
 | n8n Cloud **verified** | ✅ yes — passes n8n's community-node scanner (zero deps, no langchain, no timers) | ❌ no — self-hosted only, install manually |
 | AI-Agent **Tool** sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool) | — (wire the action nodes as Agent tools, or use the Chat Model) | ✅ included (langchain-based) |
 | Triggers | **poll**-based (n8n schedules) | **SSE-push** + poll fallback (lower latency) |
@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Fourteen nodes (11 action + 2 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Sixteen nodes (12 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -82,15 +82,17 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Webhook** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — **inbound** webhook endpoints (RFC H; requires loomcycle ≥ v0.14.x): an external POST to a loomcycle-hosted endpoint spawns an agent run / publishes to a channel. (Distinct from **Hook** above, which is outbound.)
 - **LoomCycle A2A Agent** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register **external** A2A (Agent2Agent) agents loomcycle can call as tools (RFC G; requires loomcycle ≥ v0.14.x).
 - **LoomCycle A2A Server Card** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — manage the agent card loomcycle **publishes** to expose its own agents to external A2A clients (RFC G; requires loomcycle ≥ v0.14.x).
+- **LoomCycle Interruption** — `List for User` / `List for Run` / `Resolve` — [human-in-the-loop](#human-in-the-loop) over `Interruption.ask`: list pending agent questions and post a human's answer back to unblock the parked run (requires loomcycle's consumer-MCP interruption backend).
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
 ### Trigger nodes
 
-Both triggers use n8n's **polling** framework (`poll()`), scheduled by n8n's Poll Times — no in-node timers (n8n Cloud forbids timer primitives in community nodes). Detection latency is the poll interval.
+All three triggers use n8n's **polling** framework (`poll()`), scheduled by n8n's Poll Times — no in-node timers (n8n Cloud forbids timer primitives in community nodes). Detection latency is the poll interval.
 
 - **LoomCycle: Run Completed** — polls for agent runs that have reached a terminal state (completed / failed / cancelled), deduping via workflow static data. Filterable by status + `parentAgentId`.
 - **LoomCycle: Channel Message** — polls a channel each tick: `auto-ack` (at-most-once, `subscribeChannel` poll-once) or `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
+- **LoomCycle: Interrupt Pending** — polls for new **pending interruptions** (agent questions) for a user, deduping by `interrupt_id`. Wire the output to a human channel (Slack / email / form) and feed the answer back via **LoomCycle Interruption → Resolve**.
 
 ### Cluster sub-node (plugs into n8n's AI Agent)
 
@@ -172,6 +174,16 @@ loomcycle ≥ **v0.21** adds a **non-secret metadata channel** to the agent. A c
   - **Request-sourced** — add `payload_mapping` entries with `run_metadata.<name>` targets in the *Advanced Overlay* (e.g. `{"run_metadata.repo": "$.repository.full_name"}`). These are projected from the inbound POST body and delivered **untrusted** (fenced in a `<run_metadata>` block for LLMs, `input.payload_metadata` for code-js).
 
 The Webhook node also gains **Per-Delivery Credentials** (template strings → `user_credentials`), reaching parity with the Schedule node's per-fire credentials.
+
+## Human-in-the-loop
+
+A loomcycle agent can call **`Interruption.ask`** to pause and ask a human a question (optionally with a fixed set of options). n8n is the natural place to answer it — and the **LoomCycle: Interrupt Pending** trigger + **LoomCycle Interruption** node close the loop end-to-end:
+
+1. **Interrupt Pending trigger** fires when a new pending ask appears for a user (`listUserInterrupts`, deduped by `interrupt_id`). Each item carries `run_id`, `interrupt_id`, `question`, and any `options`.
+2. **Route it to a human** — a Slack message, an email, an n8n Form, an approval step.
+3. **LoomCycle Interruption → Resolve** posts the human's `answer` back (`resolveInterrupt(run_id, interrupt_id)`). The parked agent unblocks and continues. When the ask declared options, the answer must be one of them (validated server-side).
+
+> Requires loomcycle's **consumer-MCP interruption backend** so an external resolver is accepted (set in the deployment's yaml). Without it, asks are answered through loomcycle's own Web UI / CLI instead.
 
 ## Local development install
 

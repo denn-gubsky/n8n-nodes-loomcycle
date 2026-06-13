@@ -1,0 +1,12 @@
+{
+	"node": "@loomcycle/n8n-nodes-loomcycle.loomCycleInterruptPending",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/denn-gubsky/n8n-nodes-loomcycle#trigger-nodes"
+			}
+		]
+	}
+}
