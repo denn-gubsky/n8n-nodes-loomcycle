@@ -9,6 +9,7 @@ import type {
 	CreateChannelOptions,
 	HookFailMode,
 	HookPhase,
+	InterruptStatus,
 	RegisterHookOptions,
 	RunBatchOptions,
 	RunOptions,
@@ -73,6 +74,8 @@ export async function executeLoomCycle(
 				row = await executeA2aServerCardDef(ctx, client, operation, i);
 			} else if (resource === 'hook') {
 				row = await executeHook(ctx, client, operation, i);
+			} else if (resource === 'interruption') {
+				row = await executeInterruption(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -816,6 +819,54 @@ async function executeHook(
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown hook operation: ${operation}`);
+}
+
+/**
+ * Human-in-the-loop over Interruption.ask (v0.8.16). List pending asks by
+ * user or run, and Resolve one with a human's answer so the parked agent
+ * unblocks. Requires loomcycle's consumer-MCP interruption backend to accept
+ * an external resolver.
+ */
+async function executeInterruption(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'listForUser') {
+		const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+		const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
+		if (!userId) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'User ID is required for List for User — set per-node or as a Default User ID on the credential.',
+			);
+		}
+		const status = ctx.getNodeParameter('status', i, 'pending') as InterruptStatus;
+		const resp = await client.listUserInterrupts(userId, { status });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listForRun') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const status = ctx.getNodeParameter('status', i, 'pending') as InterruptStatus;
+		const resp = await client.listRunInterrupts(runId, { status });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'resolve') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const interruptId = ctx.getNodeParameter('interruptId', i) as string;
+		const answer = ctx.getNodeParameter('answer', i) as string;
+		const resolvedBy = ctx.getNodeParameter('resolvedBy', i, '') as string;
+		const resp = await client.resolveInterrupt(runId, interruptId, {
+			answer,
+			...(resolvedBy ? { resolvedBy } : {}),
+		});
+		return { result: resp ?? { ok: true } } as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown interruption operation: ${operation}`);
 }
 
 /**
