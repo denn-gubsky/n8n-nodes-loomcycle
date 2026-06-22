@@ -12,7 +12,7 @@ Community n8n nodes for the [loomcycle](https://github.com/denn-gubsky/loomcycle
 > ## 📦 Which package do I want?
 > This is **`@loomcycle/n8n-nodes-loomcycle-full`** — the **full self-hosted edition** (24 nodes), including the langchain-based **AI-Agent Tool sub-nodes** (Memory / Channel / Sub-Agent / MCP Server Tool), **SSE-push** triggers, and the Run **Wait for Completion** op.
 > - **It is NOT n8n-Cloud-verified** and won't pass n8n's community-node scanner (it depends on `@langchain/core` and uses timers/SSE, which Cloud disallows). **Install it manually on self-hosted n8n.**
-> - If you're on **n8n Cloud** or want the verified node, use the slim **[`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)** (14 nodes; zero deps; poll-based triggers; Chat Model on `@n8n/ai-node-sdk`).
+> - If you're on **n8n Cloud** or want the verified node, use the slim **[`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle)** (20 nodes; zero deps; poll-based triggers; Chat Model on `@n8n/ai-node-sdk`).
 > - Both are built from this repo: the slim package from `main`, this full edition from the long-lived [`full-edition`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/full-edition) branch.
 
 This package realises **Phase 2 / Vector 3** of the [loomcycle ↔ n8n integration RFC](https://github.com/denn-gubsky/loomcycle-internal/blob/main/doc-internal/rfcs/n8n-comparison.md): custom n8n nodes that let operators drive loomcycle from the n8n canvas, while loomcycle stays the agentic runtime substrate.
@@ -190,7 +190,7 @@ npm link
 cd ~/.n8n/nodes
 npm link @loomcycle/n8n-nodes-loomcycle-full
 
-# Then restart n8n. The 7 nodes appear under the "LoomCycle" prefix in
+# Then restart n8n. The 24 nodes appear under the "LoomCycle" prefix in
 # the node picker.
 ```
 
@@ -206,7 +206,19 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | `content_sha256` Verify op | v0.9.x | PR #175 |
 | **MCPServerDef substrate** (dynamic MCP) | **v0.9.2** | PR #177; required by `LoomCycleMcpServerTool` |
 | `parentAgentId` filter + `debug` toggle on streams | v0.9.2 | PR #181 |
-| **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` | **v0.10.x** | enables n8n AI Agent's Chat Model slot to route through loomcycle |
+| **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` + `LoomCycle LLM` | **v0.10.x / v0.11** | Chat Model sub-node + LLM action node (Chat / Embeddings) |
+| Per-tool credentials (RFC F) + Schedule (RFC E) | **v0.12.x** | Schedule action node |
+| Inbound Webhooks (RFC H) + A2A (RFC G) | **v0.14.x** | Webhook + A2A Agent / A2A Server Card action nodes |
+| Memory Backend (RFC I) | **v0.15** | Memory Backend action node |
+| Interruption (human-in-the-loop) | **v0.8.16** | Interruption node + Interrupt Pending trigger; resolve needs the consumer-MCP backend |
+| Snapshot backup / restore | **v0.8.17** | Snapshot action node |
+| Operator Token (RFC L multi-tenant auth) | **v0.17** | Operator Token node (get/list/retire); `/v1/_me` credential test |
+| Inline code-js `code_body` + MCP tool auto-discovery | **v0.20** | Agent Definition JS editor; MCP Server discover toggle |
+| Non-secret metadata channel | **v0.21** | Metadata (JSON) on Run / Schedule / Webhook |
+| Channel fan-in / fan-out (RFC S) | **v0.25** | Channel Await / Broadcast |
+| Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
+| Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
+| Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
@@ -219,7 +231,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^0.11.5`. The adapter tracks loomcycle's minor version; major loomcycle versions will require a coordinated `@loomcycle/n8n-nodes-loomcycle` major bump. v0.11.0 added `llmChat()` + `llmStream()` typed wrappers around the LLM Gateway endpoint (`POST /v1/_llm/chat`); v0.11.5 added Memory writes (`setMemoryEntry` / `deleteMemoryEntry`) + runtime Channel admin CRUD (`createChannel` / `updateChannel` / `deleteChannel`), both consumed by this package's 1.2.0 release.
+This package pins `@loomcycle/client` to `^0.34.0`, **bundled into the published nodes at build time** (esbuild) — so the install carries no runtime npm dependency on the adapter. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. As of v2.10.0 the package covers the full loomcycle v0.34 surface (see the compatibility table above). `@langchain/core` is a peer (the Tool sub-nodes + Chat Model); `n8n-workflow` is the host-provided peer.
 
 ### Verified deployments
 
