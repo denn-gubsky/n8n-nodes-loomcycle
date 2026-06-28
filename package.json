@@ -1,10 +1,10 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "3.9.0",
+	"version": "3.10.0",
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 20 nodes — 16 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card, Interruption, LLM, Memory Backend, Operator Token, Snapshot), 3 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x).",
+	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 20 nodes — 16 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card, Interruption, LLM, Memory Backend, Operator Token, Snapshot), 3 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x; interactive run steering requires ≥ v1.1.1).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -78,7 +78,7 @@
 		"n8n-workflow": "*"
 	},
 	"devDependencies": {
-		"@loomcycle/client": "^0.34.0",
+		"@loomcycle/client": "^1.4.0",
 		"@n8n/ai-node-sdk": "^0.13.1",
 		"@types/node": "^20.14.0",
 		"@typescript-eslint/eslint-plugin": "^7.18.0",

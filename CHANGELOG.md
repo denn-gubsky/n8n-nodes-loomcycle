@@ -2,6 +2,24 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] — 2026-06-28
+
+**Minor release.** Interactive run steering (RFC AI) and the adapter bump to the loomcycle 1.x line. Phase 1 of the v1.4 catch-up. **Node count unchanged at 20** — these are new operations on the existing Run node. Pins `@loomcycle/client@^1.4.0`.
+
+### Added
+
+- **Run → Send Input op** (`sendRunInput`, loomcycle ≥ v1.1.1) — push an operator turn into a live interactive run parked at `end_turn`. Returns `{ run_id, delivered }`; `delivered: false` means no parked run accepted it (already finished, or steering disabled on the substrate).
+- **Run → Spawn → Interactive Session field** (`RunOptions.interactive`, loomcycle ≥ v1.1.1) — start a persistent run that parks at `end_turn` for steering. The node returns as soon as the run parks (with its `run_id` and `awaitingInput: true`) instead of blocking for completion; drive it afterwards with **Send Input** and read final output via the **Run Completed** trigger or **Get Status**.
+
+### Changed
+
+- **`@loomcycle/client` pinned `^0.34.0 → ^1.4.0`.** loomcycle 1.5/1.6 added no new wire RPCs (config / UI only), so 1.4.0 captures the full buildable surface. The bundled adapter refreshes on build.
+
+### Notable design decisions
+
+- **Interactive spawns don't drain to completion.** An interactive run's stream stays open awaiting the next operator turn — a normal drain would block forever. The drain helper now breaks on the first `awaiting_input` frame (closing the SSE iterator while the run keeps running on the substrate), so the node returns the `run_id` for later steering.
+- **`channelDef` and `register_agent`/`unregister_agent` deliberately not surfaced** — they exist as loomcycle MCP meta-tools but have no typed `@loomcycle/client` method yet (the iron rule: we only consume the adapter). Channels stay on the existing runtime CRUD; agent registration stays `agentDef({op:'create'})`.
+
 ## [3.9.0] — 2026-06-13
 
 **Minor release.** Runtime snapshot backup / restore from n8n. Phase 5 (final) of the v0.34 catch-up. **19 → 20 nodes** (16 action + 3 trigger + 1 sub-node).

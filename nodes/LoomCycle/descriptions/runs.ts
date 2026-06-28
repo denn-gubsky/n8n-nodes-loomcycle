@@ -54,6 +54,12 @@ export const runOps: INodeProperties[] = [
 				action: 'List agents for a user',
 			},
 			{
+				name: 'Send Input',
+				value: 'sendInput',
+				description: 'Push an operator turn into a live interactive run parked at end_turn (loomcycle ≥ v1.1.1)',
+				action: 'Send input to an interactive run',
+			},
+			{
 				name: 'Spawn',
 				value: 'spawn',
 				description: 'Spawn a new loomcycle agent run and wait synchronously for completion',
@@ -155,6 +161,19 @@ export const runOps: INodeProperties[] = [
 				default: '{}',
 				description:
 					'Per-run context-compaction override (loomcycle ≥ v0.32), e.g. `{"enabled":true,"keepLastN":4,"autocompactAtPct":80}`. Keys: enabled, targetPercentage, keepLastN, keepFirst, autocompactAtPct, model. Empty = inherit the agent\'s settings.',
+			},
+			{
+				// loomcycle v1.1.1 (RFC AI): start a PERSISTENT interactive run
+				// that parks at end_turn instead of running to completion. The
+				// node returns once the run parks (awaitingInput: true, with the
+				// run_id) rather than blocking for the full run — drive it
+				// afterwards with the Send Input op or the Run Completed trigger.
+				displayName: 'Interactive Session',
+				name: 'interactive',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to start a persistent interactive run that parks at end_turn awaiting operator steering (loomcycle ≥ v1.1.1). The node returns as soon as the run parks (with its run_id and awaitingInput: true) instead of waiting for completion. Push follow-up turns with the Send Input operation, and read final output via the Run Completed trigger or Get Status.',
 			},
 			{
 				// loomcycle v0.21: non-secret structured metadata channel.
@@ -278,15 +297,27 @@ export const runOps: INodeProperties[] = [
 		description: 'Operator-visible reason recorded with the cancellation / compaction',
 	},
 
-	// ---- Compact: Run ID ----
+	// ---- Compact / Send Input: shared Run ID ----
 	{
 		displayName: 'Run ID',
 		name: 'runId',
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['run'], operation: ['compact'] } },
-		description: 'The run_id to compact (from a Spawn output). Summarises its conversation; reports before/after token counts + whether applied live, as a marker, or a no-op.',
+		displayOptions: { show: { resource: ['run'], operation: ['compact', 'sendInput'] } },
+		description: 'The run_id to target (from a Spawn output). Compact summarises its conversation; Send Input delivers an operator turn to it if it is a live interactive run parked at end_turn.',
+	},
+
+	// ---- Send Input: the operator turn ----
+	{
+		displayName: 'Input Text',
+		name: 'inputText',
+		type: 'string',
+		typeOptions: { rows: 3 },
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['run'], operation: ['sendInput'] } },
+		description: 'Operator message delivered to the parked interactive run as the next user turn. The response returns `delivered: false` if no parked run accepted it (the run already finished, or steering is disabled on the substrate).',
 	},
 
 	// ---- Get Transcript: Session ID ----
