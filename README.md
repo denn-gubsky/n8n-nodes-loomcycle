@@ -205,7 +205,7 @@ npm link
 cd ~/.n8n/nodes
 npm link @loomcycle/n8n-nodes-loomcycle
 
-# Then restart n8n. The 14 nodes appear under the "LoomCycle" prefix in
+# Then restart n8n. The 20 nodes appear under the "LoomCycle" prefix in
 # the node picker.
 ```
 
@@ -237,7 +237,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` (bundled, not a runtime dependency)
 
-`@loomcycle/client` (`^0.14.1`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
+`@loomcycle/client` (`^0.34.0`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
 
 ### Verified deployments
 
