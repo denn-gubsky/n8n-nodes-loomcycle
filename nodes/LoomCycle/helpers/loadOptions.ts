@@ -162,6 +162,32 @@ export async function loadSnapshots(this: ILoadOptionsFunctions): Promise<INodeP
 }
 
 /**
+ * List the caller's persistent volumes via GET /v1/_volumes (RFC AH,
+ * loomcycle ≥ v1.1). Backs the Get / Delete / Purge name dropdown on the
+ * Volume node. Each option is badged with its source (static floor vs the
+ * tenant's dynamic VolumeDefs) + mode, so an operator can tell a managed
+ * dynamic volume from the read-only static floor at a glance. Delete / Purge
+ * only succeed on dynamic volumes; the substrate refuses static ones.
+ */
+export async function loadVolumes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.listVolumes();
+		const entries = [...resp.entries].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
+			return [{ name: '— no volumes; create one or type a name manually —', value: '' }];
+		}
+		return entries.map((v) => ({
+			name: v.name,
+			value: v.name,
+			description: `${v.source} · ${v.mode}${v.default ? ' · default' : ''}`,
+		}));
+	} catch (err) {
+		return [failedToLoadOption('volumes', err)];
+	}
+}
+
+/**
  * List known Memory scopes via GET /v1/_memory/scopes.
  */
 export async function loadMemoryScopes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {

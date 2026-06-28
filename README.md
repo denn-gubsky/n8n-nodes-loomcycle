@@ -20,7 +20,7 @@ This repo ships **two parallel packages** from **two branches**. Pick by where y
 |---|---|---|
 | npm | [`@loomcycle/n8n-nodes-loomcycle`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle) | [`@loomcycle/n8n-nodes-loomcycle-full`](https://www.npmjs.com/package/@loomcycle/n8n-nodes-loomcycle-full) |
 | branch | [`main`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/main) | [`full-edition`](https://github.com/denn-gubsky/n8n-nodes-loomcycle/tree/full-edition) |
-| nodes | **20** | **24** |
+| nodes | **22** | **26** |
 | n8n Cloud **verified** | ✅ yes — passes n8n's community-node scanner (zero deps, no langchain, no timers) | ❌ no — self-hosted only, install manually |
 | AI-Agent **Tool** sub-nodes (Memory / Channel / Sub-Agent / MCP Server Tool) | — (wire the action nodes as Agent tools, or use the Chat Model) | ✅ included (langchain-based) |
 | Triggers | **poll**-based (n8n schedules) | **SSE-push** + poll fallback (lower latency) |
@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Twenty nodes (16 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Twenty-two nodes (18 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -87,6 +87,8 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Memory Backend** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — versioned memory-backend definitions (in-process or external REST store + ranker) that agents' Memory tool dispatches to (RFC I; requires loomcycle ≥ v0.15).
 - **LoomCycle Operator Token** — `Get` / `List` / `Retire` — operator-token lifecycle (RFC L; requires loomcycle ≥ v0.17). **Mint + rotate are intentionally NOT here** — those return the token secret, which must not enter n8n execution data; do them via the loomcycle Web UI / CLI.
 - **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
+- **LoomCycle Volume** — `Create` / `Get` / `List` / `List Ephemeral` / `Delete` / `Purge` — filesystem Volumes (RFC AH; requires loomcycle ≥ v1.1). Provision named ro/rw filesystem roots for agents (the runtime derives the on-disk path); since v1.1 a Volume is the only way an agent gets filesystem access. `Delete` unmaps but keeps the files; `Purge` removes the tree.
+- **LoomCycle Path** — `Resolve` / `List` / `Stat` / `Make Directory` / `Move` / `Remove` — the Path VFS (RFC AL; requires loomcycle ≥ v1.4): a Unix-like filesystem naming Memory entries / Volume mounts / Documents by human-readable path (e.g. `/docs/launch`). Scope (agent / user / tenant) resolves server-side from the bearer.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -225,6 +227,18 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Per-tool credentials (RFC F) + Schedule (RFC E) | **v0.12.x** | Schedule action node |
 | Inbound Webhooks (RFC H) + A2A (RFC G) | **v0.14.x** | Webhook + A2A Agent / A2A Server Card action nodes |
 | **Interactive run steering** (RFC AI) — `Run → Send Input` + Spawn's *Interactive Session* | **v1.1.1** | push operator turns into a run parked at `end_turn` |
+| **Filesystem Volumes** (RFC AH) — Volume node | **v1.1** | named ro/rw filesystem roots; the only way an agent gets filesystem access since v1.1 |
+| **Path VFS** (RFC AL) — Path node | **v1.4** | name Memory / Volumes / Documents by human-readable path |
+| Memory Backend (RFC I) | **v0.15** | Memory Backend action node |
+| Interruption (human-in-the-loop) | **v0.8.16** | Interruption node + Interrupt Pending trigger; resolve needs the consumer-MCP backend |
+| Snapshot backup / restore | **v0.8.17** | Snapshot action node |
+| Operator Token (RFC L multi-tenant auth) | **v0.17** | Operator Token node (get/list/retire); `/v1/_me` credential test |
+| Inline code-js `code_body` + MCP tool auto-discovery | **v0.20** | Agent Definition JS editor; MCP Server discover toggle |
+| Non-secret metadata channel | **v0.21** | Metadata (JSON) on Run / Schedule / Webhook |
+| Channel fan-in / fan-out (RFC S) | **v0.25** | Channel Await / Broadcast |
+| Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
+| Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
+| Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
