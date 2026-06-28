@@ -20,6 +20,12 @@ export interface RunDrainResult {
 	sessionId?: string;
 	agentId?: string;
 	runId?: string;
+	/**
+	 * True when the run parked at `end_turn` awaiting operator input (RFC AI
+	 * interactive runs). Set only when {@link drainRunStream} was asked to
+	 * stop on the `awaiting_input` frame — see `stopOnAwaitingInput`.
+	 */
+	awaitingInput?: boolean;
 }
 
 /**
@@ -29,14 +35,26 @@ export interface RunDrainResult {
  * function to throw — the action node's `wrapLoomcycleError` catches and
  * surfaces them as NodeApiError. Other event types fold into the compact
  * summary returned.
+ *
+ * `stopOnAwaitingInput` (RFC AI): an interactive run parks at `end_turn` and
+ * its stream stays open indefinitely awaiting the next operator turn — a plain
+ * drain would block forever. With this flag set, the loop breaks on the first
+ * `awaiting_input` frame and returns what it has so far (run_id / agent_id /
+ * session_id are emitted earlier in the stream), with `awaitingInput: true`.
+ * Breaking the `for await` closes the underlying SSE iterator; the run keeps
+ * running on the substrate, to be steered later via `sendRunInput`.
  */
-export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise<RunDrainResult> {
+export async function drainRunStream(
+	stream: AsyncIterable<AgentEvent>,
+	opts: { stopOnAwaitingInput?: boolean } = {},
+): Promise<RunDrainResult> {
 	let finalText = '';
 	let usage: Usage | undefined;
 	let stopReason: string | undefined;
 	let sessionId: string | undefined;
 	let agentId: string | undefined;
 	let runId: string | undefined;
+	let awaitingInput: boolean | undefined;
 	let errorMessage: string | undefined;
 
 	for await (const ev of stream) {
@@ -59,11 +77,15 @@ export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise
 		if (ev.type === 'error' || ev.is_error === true) {
 			errorMessage = ev.error ?? 'unknown error from loomcycle';
 		}
+		if (ev.type === 'awaiting_input') {
+			awaitingInput = true;
+			if (opts.stopOnAwaitingInput) break;
+		}
 	}
 
 	if (errorMessage) {
 		throw new Error(errorMessage);
 	}
 
-	return { finalText, usage, stopReason, sessionId, agentId, runId };
+	return { finalText, usage, stopReason, sessionId, agentId, runId, awaitingInput };
 }

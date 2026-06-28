@@ -175,8 +175,28 @@ async function executeRun(
 			runOpts.webSearchFilter = webSearchFilter;
 		}
 
-		const result = await drainRunStream(client.runStreaming(runOpts));
+		// RFC AI (v1.1.1): interactive run — park at end_turn for operator
+		// steering rather than running to completion. We must NOT drain to a
+		// terminal state (the stream stays open awaiting input); drain only
+		// until the run parks, then return the run_id so a later Send Input
+		// (or the Run Completed trigger) can drive it.
+		const interactive = additionalFields.interactive === true;
+		if (interactive) runOpts.interactive = true;
+
+		const result = await drainRunStream(client.runStreaming(runOpts), {
+			stopOnAwaitingInput: interactive,
+		});
 		return result as unknown as IDataObject;
+	}
+
+	if (operation === 'sendInput') {
+		// RFC AI (v1.1.1): push an operator turn into a live interactive run
+		// parked at end_turn. Returns { run_id, delivered }; delivered=false
+		// means no parked run accepted it (already finished, or steering off).
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const text = ctx.getNodeParameter('inputText', i) as string;
+		const resp = await client.sendRunInput(runId, text);
+		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'getStatus') {

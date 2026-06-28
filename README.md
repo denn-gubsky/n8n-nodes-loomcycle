@@ -71,7 +71,7 @@ Twenty nodes (16 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one cred
 
 As of **2.0.0** the former single multi-resource umbrella node is split into **dedicated action nodes**, each with its own canvas icon (n8n renders one icon per node type — separate nodes are the only way to give each entity a distinct glyph). They all share one credential and one wire client; they are drag-and-drop separate in the node picker.
 
-- **LoomCycle Run** — `Spawn` / `Spawn Batch` / `Get Status` / `Get Transcript` / `Compact` / `Cancel` / `List Agents`. Spawn-time **Sampling** / **Compaction** / **Run Timeout** overrides live under *Additional Fields*. `Spawn Batch` fans out up to 32 runs (loomcycle ≥ v0.33); `Compact` summarises a parked run's context (≥ v0.33). (To wait for completion, use the **Run Completed** trigger or n8n's own Wait node.)
+- **LoomCycle Run** — `Spawn` / `Spawn Batch` / `Send Input` / `Get Status` / `Get Transcript` / `Compact` / `Cancel` / `List Agents`. Spawn-time **Sampling** / **Compaction** / **Run Timeout** overrides live under *Additional Fields*. `Spawn Batch` fans out up to 32 runs (loomcycle ≥ v0.33); `Compact` summarises a parked run's context (≥ v0.33). For **interactive runs** (loomcycle ≥ v1.1.1), enable *Additional Fields → Interactive Session* on `Spawn` — the node returns the `run_id` once the run parks at `end_turn`; steer it with `Send Input` and read final output via the **Run Completed** trigger. (To wait for non-interactive completion, use the **Run Completed** trigger or n8n's own Wait node.)
 - **LoomCycle Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` (full CRUD; per-tool credentials `userCredentials` map on Spawn require loomcycle ≥ v0.12.x)
 - **LoomCycle Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `Await` / `Broadcast` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` / `Purge Channel`. `Await` (fan-in) waits on a predicate across channels and `Broadcast` (fan-out) publishes to many atomically (loomcycle ≥ v0.25); yaml-declared channels remain immutable (but `Purge` is allowed on them).
 - **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip). Create/Fork expose a **Provider** dropdown (folded into the overlay); selecting **Code-JS** authors a [deterministic JavaScript agent](#code-js-agents) (RFC J).
@@ -224,18 +224,9 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | **LLM Gateway (`POST /v1/_llm/chat`)** powering `LoomCycle Chat Model` | **v0.10.x** | enables n8n AI Agent's Chat Model slot to route through loomcycle |
 | Per-tool credentials (RFC F) + Schedule (RFC E) | **v0.12.x** | Schedule action node |
 | Inbound Webhooks (RFC H) + A2A (RFC G) | **v0.14.x** | Webhook + A2A Agent / A2A Server Card action nodes |
-| Memory Backend (RFC I) | **v0.15** | Memory Backend action node |
-| Interruption (human-in-the-loop) | **v0.8.16** | Interruption node + Interrupt Pending trigger; resolve needs the consumer-MCP backend |
-| Snapshot backup / restore | **v0.8.17** | Snapshot action node |
-| Operator Token (RFC L multi-tenant auth) | **v0.17** | Operator Token node (get/list/retire); `/v1/_me` credential test |
-| Inline code-js `code_body` + MCP tool auto-discovery | **v0.20** | Agent Definition JS editor; MCP Server discover toggle |
-| Non-secret metadata channel | **v0.21** | Metadata (JSON) on Run / Schedule / Webhook |
-| Channel fan-in / fan-out (RFC S) | **v0.25** | Channel Await / Broadcast |
-| Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
-| Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
-| Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
+| **Interactive run steering** (RFC AI) — `Run → Send Input` + Spawn's *Interactive Session* | **v1.1.1** | push operator turns into a run parked at `end_turn` |
 
-The package targets `@loomcycle/client@^0.34.0`; basic Run / Memory / Channel ops still work on much older substrates. If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
+If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
 ### n8n version compatibility
 

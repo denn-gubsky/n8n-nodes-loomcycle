@@ -6,6 +6,7 @@ const { mockClient } = vi.hoisted(() => ({
 	mockClient: {
 		runStreaming: vi.fn(),
 		continueSession: vi.fn(),
+		sendRunInput: vi.fn(),
 		spawnRunBatch: vi.fn(),
 		compactRun: vi.fn(),
 		getTranscript: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 import { LoomCycleRun as LoomCycle } from '../../../nodes/LoomCycleRun/LoomCycleRun.node';
 import { makeExecuteContext, asAsyncIterable, fakeSuccessfulRunEvents } from './_helpers';
 import { AgentNotFoundError } from '@loomcycle/client';
+import type { AgentEvent } from '@loomcycle/client';
 
 beforeEach(() => {
 	Object.values(mockClient).forEach((fn) => fn.mockReset());
@@ -397,6 +399,64 @@ describe('LoomCycle resource=run', () => {
 				params: { resource: 'run', operation: 'spawnBatch', batchSpawns: {} },
 			});
 			await expect(node.execute.call(empty)).rejects.toBeInstanceOf(NodeOperationError);
+		});
+	});
+
+	describe('Spawn (interactive)', () => {
+		it('interactive=true sets RunOptions.interactive and stops draining at awaiting_input', async () => {
+			// The stream parks (awaiting_input) then KEEPS emitting — a
+			// non-interactive drain would consume the trailing text. The break
+			// on awaiting_input must stop us before it (regression guard).
+			const events = [
+				{ type: 'session', session_id: 's1' },
+				{ type: 'agent', agent_id: 'a1', run_id: 'r1' },
+				{ type: 'started' },
+				{ type: 'text', text: 'thinking…' },
+				{ type: 'awaiting_input', awaiting_input: { since_turn: 1 } },
+				{ type: 'text', text: 'SHOULD-NOT-APPEAR' },
+			] as AgentEvent[];
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(events));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: { interactive: true },
+				},
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.runStreaming.mock.calls[0][0].interactive).toBe(true);
+			const json = result[0][0].json as Record<string, unknown>;
+			expect(json.awaitingInput).toBe(true);
+			expect(json.runId).toBe('r1');
+			expect(json.finalText).toBe('thinking…'); // broke before the trailing text
+		});
+
+		it('does NOT set interactive on a normal spawn', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q', additionalFields: {} },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.runStreaming.mock.calls[0][0].interactive).toBeUndefined();
+		});
+	});
+
+	describe('Send Input', () => {
+		it('forwards runId + text to sendRunInput and returns the delivery result', async () => {
+			mockClient.sendRunInput.mockResolvedValue({ run_id: 'r1', delivered: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'sendInput', runId: 'r1', inputText: 'use the staging DB' },
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.sendRunInput).toHaveBeenCalledWith('r1', 'use the staging DB');
+			const json = result[0][0].json as Record<string, unknown>;
+			expect(json.delivered).toBe(true);
+			expect(json.run_id).toBe('r1');
 		});
 	});
 });
