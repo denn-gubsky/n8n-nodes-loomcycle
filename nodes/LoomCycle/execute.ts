@@ -14,12 +14,14 @@ import type {
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
+	PathToolInput,
 	RegisterHookOptions,
 	RunBatchOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
 	SubstrateToolInput,
 	UpdateChannelOptions,
+	VolumeMode,
 } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from './helpers/client';
@@ -88,6 +90,10 @@ export async function executeLoomCycle(
 				row = await executeOperatorTokenDef(ctx, client, operation, i);
 			} else if (resource === 'snapshot') {
 				row = await executeSnapshot(ctx, client, operation, i);
+			} else if (resource === 'volume') {
+				row = await executeVolume(ctx, client, operation, i);
+			} else if (resource === 'path') {
+				row = await executePath(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -914,6 +920,85 @@ async function executeSnapshot(
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown snapshot operation: ${operation}`);
+}
+
+/**
+ * Filesystem Volume lifecycle (RFC AH, loomcycle ≥ v1.1). Volumes are FLAT
+ * (no version chain), so this is plain CRUD over `client.volumeDef(...)`:
+ * create (name + mode; the runtime derives the path) / get / delete (unmap,
+ * keep files) / purge (unmap + remove tree). The two list views read the
+ * persistent universe (`listVolumes`) and the live run-scoped ephemerals
+ * (`listEphemeralVolumes`).
+ */
+async function executeVolume(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'list') {
+		const resp = await client.listVolumes();
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listEphemeral') {
+		const resp = await client.listEphemeralVolumes();
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'create') {
+		const name = ctx.getNodeParameter('name', i) as string;
+		const mode = ctx.getNodeParameter('mode', i, 'rw') as VolumeMode;
+		const resp = await client.volumeDef({ op: 'create', name, mode });
+		return { result: resp } as IDataObject;
+	}
+
+	// get / delete / purge — the name comes from the loadVolumes dropdown.
+	if (operation === 'get' || operation === 'delete' || operation === 'purge') {
+		const name = ctx.getNodeParameter('volumeName', i) as string;
+		const resp = await client.volumeDef({ op: operation, name });
+		return { result: resp } as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown volume operation: ${operation}`);
+}
+
+/**
+ * Path VFS ops (RFC AL, loomcycle ≥ v1.4) over `client.path(...)`. A Unix-like
+ * filesystem naming Memory entries / Volume mounts / Documents. Scope
+ * (agent/user/tenant) is forwarded as a routing hint; the substrate resolves
+ * the authoritative tenant + subject from the bearer. The op-specific extras
+ * (`to` for mv, `recursive` + `kind_filter` for ls, `recursive` for rm) ride
+ * the same PathToolInput.
+ */
+async function executePath(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input: PathToolInput = {
+		op: operation as PathToolInput['op'],
+		path: ctx.getNodeParameter('path', i) as string,
+		scope: ctx.getNodeParameter('scope', i, 'agent') as PathToolInput['scope'],
+	};
+
+	if (operation === 'mv') {
+		input.to = ctx.getNodeParameter('to', i) as string;
+	}
+
+	if (operation === 'ls') {
+		if (ctx.getNodeParameter('recursive', i, false) as boolean) input.recursive = true;
+		const kindFilter = ctx.getNodeParameter('kindFilter', i, '') as string;
+		if (kindFilter) input.kind_filter = kindFilter;
+	}
+
+	if (operation === 'rm') {
+		if (ctx.getNodeParameter('recursive', i, false) as boolean) input.recursive = true;
+	}
+
+	const resp = await client.path(input);
+	return { result: resp } as IDataObject;
 }
 
 /**

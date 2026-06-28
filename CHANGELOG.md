@@ -2,6 +2,28 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] — 2026-06-28
+
+**Minor release.** Two new substrate primitives from the loomcycle 1.x line — Filesystem Volumes (RFC AH) and the Path VFS (RFC AL). Phase 2 of the v1.4 catch-up. **20 → 22 nodes** (18 action + 3 trigger + 1 sub-node).
+
+### Added
+
+- **LoomCycle Volume node** (`volumeDef` + `listVolumes` + `listEphemeralVolumes`, RFC AH, loomcycle ≥ v1.1) — 6 ops:
+  - **Create** — provision a dynamic volume with a name + **Mode** (ro / rw); the runtime derives the on-disk path inside its `dynamic_root` (callers never supply one).
+  - **Get** — fetch a single volume by name.
+  - **List** (`listVolumes`) — the persistent universe: the static (yaml) floor + the tenant's dynamic volumes, each badged by source + mode (host paths redacted for non-operator callers).
+  - **List Ephemeral** (`listEphemeralVolumes`) — live run-scoped volumes (auto-purged when their run completes).
+  - **Delete** — unmap a volume (keeps the files on disk).
+  - **Purge** — destructive: unmap **and** remove the directory tree.
+  - A `loadVolumes` dropdown backs Get / Delete / Purge.
+- **LoomCycle Path node** (`path`, RFC AL, loomcycle ≥ v1.4) — 6 ops over the Unix-like VFS that names Memory entries / Volume mounts / Documents by path: **Resolve** / **List** (ls, with Recursive + Kind Filter) / **Stat** / **Make Directory** / **Move** / **Remove** (Recursive required for non-empty paths). A **Scope** selector (agent / user / tenant) is forwarded as a routing hint; the substrate resolves the authoritative tenant + subject from the bearer.
+
+### Notable design decisions
+
+- **Volumes are modelled flat, not versioned.** A `VolumeDef` points at mutable on-disk state, so there is no fork/promote/retire chain — the node exposes plain CRUD + the two list views, matching the adapter's op set.
+- **Delete vs Purge are distinct ops** (not a flag) because the consequences differ sharply: Delete is reversible (files survive), Purge removes the tree. Surfacing them separately makes the destructive path explicit in the operation picker.
+- **Path is a naming layer, not storage.** Resources opt into a name elsewhere (Memory.set, VolumeDef.create, Document.create_document); the Path node reads / reorganises that namespace. `mkdir` is exposed for parity though directories are implicit.
+
 ## [3.10.0] — 2026-06-28
 
 **Minor release.** Interactive run steering (RFC AI) and the adapter bump to the loomcycle 1.x line. Phase 1 of the v1.4 catch-up. **Node count unchanged at 20** — these are new operations on the existing Run node. Pins `@loomcycle/client@^1.4.0`.
