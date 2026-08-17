@@ -1,4 +1,4 @@
-import type { AgentEvent, Usage } from '@loomcycle/client';
+import type { AgentEvent, LimitInfo, Usage } from '@loomcycle/client';
 
 /**
  * Result of draining a runStreaming() iterable into a single n8n output.
@@ -20,6 +20,23 @@ export interface RunDrainResult {
 	sessionId?: string;
 	agentId?: string;
 	runId?: string;
+	/**
+	 * True when the run parked at `end_turn` awaiting operator input (RFC AI
+	 * interactive runs). Set only when {@link drainRunStream} was asked to
+	 * stop on the `awaiting_input` frame — see `stopOnAwaitingInput`.
+	 */
+	awaitingInput?: boolean;
+	/**
+	 * Token-budget crossings the substrate reported during this run (RFC AW,
+	 * loomcycle ≥ v1.11). A `severity: "soft"` entry is a warning and the run
+	 * continues; `"hard"` means the NEXT run is refused at admission. Collected
+	 * as an array because more than one can fire — a soft warning at run start
+	 * and a further crossing mid-run are separate frames.
+	 *
+	 * Present only when at least one `limit` frame arrived, so a workflow can
+	 * branch on its existence rather than comparing counts.
+	 */
+	limits?: LimitInfo[];
 }
 
 /**
@@ -29,15 +46,28 @@ export interface RunDrainResult {
  * function to throw — the action node's `wrapLoomcycleError` catches and
  * surfaces them as NodeApiError. Other event types fold into the compact
  * summary returned.
+ *
+ * `stopOnAwaitingInput` (RFC AI): an interactive run parks at `end_turn` and
+ * its stream stays open indefinitely awaiting the next operator turn — a plain
+ * drain would block forever. With this flag set, the loop breaks on the first
+ * `awaiting_input` frame and returns what it has so far (run_id / agent_id /
+ * session_id are emitted earlier in the stream), with `awaitingInput: true`.
+ * Breaking the `for await` closes the underlying SSE iterator; the run keeps
+ * running on the substrate, to be steered later via `sendRunInput`.
  */
-export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise<RunDrainResult> {
+export async function drainRunStream(
+	stream: AsyncIterable<AgentEvent>,
+	opts: { stopOnAwaitingInput?: boolean } = {},
+): Promise<RunDrainResult> {
 	let finalText = '';
 	let usage: Usage | undefined;
 	let stopReason: string | undefined;
 	let sessionId: string | undefined;
 	let agentId: string | undefined;
 	let runId: string | undefined;
+	let awaitingInput: boolean | undefined;
 	let errorMessage: string | undefined;
+	const limits: LimitInfo[] = [];
 
 	for await (const ev of stream) {
 		if (ev.type === 'text' && typeof ev.text === 'string') {
@@ -59,11 +89,27 @@ export async function drainRunStream(stream: AsyncIterable<AgentEvent>): Promise
 		if (ev.type === 'error' || ev.is_error === true) {
 			errorMessage = ev.error ?? 'unknown error from loomcycle';
 		}
+		if (ev.type === 'limit' && ev.limit) {
+			limits.push(ev.limit);
+		}
+		if (ev.type === 'awaiting_input') {
+			awaitingInput = true;
+			if (opts.stopOnAwaitingInput) break;
+		}
 	}
 
 	if (errorMessage) {
 		throw new Error(errorMessage);
 	}
 
-	return { finalText, usage, stopReason, sessionId, agentId, runId };
+	return {
+		finalText,
+		usage,
+		stopReason,
+		sessionId,
+		agentId,
+		runId,
+		awaitingInput,
+		...(limits.length > 0 ? { limits } : {}),
+	};
 }

@@ -6,11 +6,15 @@ const { mockClient } = vi.hoisted(() => ({
 	mockClient: {
 		runStreaming: vi.fn(),
 		continueSession: vi.fn(),
+		sendRunInput: vi.fn(),
 		spawnRunBatch: vi.fn(),
 		compactRun: vi.fn(),
 		getTranscript: vi.fn(),
 		getAgent: vi.fn(),
 		cancelAgent: vi.fn(),
+		cancelTurn: vi.fn(),
+		replaySession: vi.fn(),
+		runnableAgents: vi.fn(),
 		listUserAgents: vi.fn(),
 		listMemoryScopes: vi.fn(),
 		listMemoryScopeIDs: vi.fn(),
@@ -33,6 +37,7 @@ vi.mock('@loomcycle/client', async (importActual) => {
 import { LoomCycleRun as LoomCycle } from '../../../nodes/LoomCycleRun/LoomCycleRun.node';
 import { makeExecuteContext, asAsyncIterable, fakeSuccessfulRunEvents } from './_helpers';
 import { AgentNotFoundError } from '@loomcycle/client';
+import type { AgentEvent } from '@loomcycle/client';
 
 beforeEach(() => {
 	Object.values(mockClient).forEach((fn) => fn.mockReset());
@@ -115,7 +120,12 @@ describe('LoomCycle resource=run', () => {
 			expect(arg.segments[0].content[0].type).toBe('untrusted-block');
 		});
 
-		it('parses allowedTools CSV into an array', async () => {
+		// Regression: loomcycle v1.13.0 renamed the run body's `allowed_tools`
+		// to `tools`. The n8n parameter deliberately keeps its old name so saved
+		// workflows keep resolving, so this asserts BOTH halves of the mapping —
+		// the new wire field is populated AND the old one is gone. Reverting
+		// execute.ts to `runOpts.allowedTools` fails both assertions.
+		it('Spawn maps the allowedTools parameter onto the renamed tools wire field', async () => {
 			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
 			const node = new LoomCycle();
 			const ctx = makeExecuteContext({
@@ -129,7 +139,8 @@ describe('LoomCycle resource=run', () => {
 			});
 			await node.execute.call(ctx);
 			const arg = mockClient.runStreaming.mock.calls[0][0];
-			expect(arg.allowedTools).toEqual(['Memory', 'Channel', 'AgentDef']);
+			expect(arg.tools).toEqual(['Memory', 'Channel', 'AgentDef']);
+			expect(arg.allowedTools).toBeUndefined();
 		});
 
 		it('forwards metadata as a parsed object (v0.21)', async () => {
@@ -261,6 +272,8 @@ describe('LoomCycle resource=run', () => {
 		});
 	});
 
+	// FULL EDITION ONLY — the slim edition has no Wait op (n8n Cloud's scanner
+	// bans the timer primitives it needs).
 	describe('Wait', () => {
 		it('returns the Agent when status flips to completed', async () => {
 			mockClient.getAgent
@@ -433,6 +446,273 @@ describe('LoomCycle resource=run', () => {
 				params: { resource: 'run', operation: 'spawnBatch', batchSpawns: {} },
 			});
 			await expect(node.execute.call(empty)).rejects.toBeInstanceOf(NodeOperationError);
+		});
+	});
+
+	describe('Spawn (interactive)', () => {
+		it('interactive=true sets RunOptions.interactive and stops draining at awaiting_input', async () => {
+			// The stream parks (awaiting_input) then KEEPS emitting — a
+			// non-interactive drain would consume the trailing text. The break
+			// on awaiting_input must stop us before it (regression guard).
+			const events = [
+				{ type: 'session', session_id: 's1' },
+				{ type: 'agent', agent_id: 'a1', run_id: 'r1' },
+				{ type: 'started' },
+				{ type: 'text', text: 'thinking…' },
+				{ type: 'awaiting_input', awaiting_input: { since_turn: 1 } },
+				{ type: 'text', text: 'SHOULD-NOT-APPEAR' },
+			] as AgentEvent[];
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(events));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: { interactive: true },
+				},
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.runStreaming.mock.calls[0][0].interactive).toBe(true);
+			const json = result[0][0].json as Record<string, unknown>;
+			expect(json.awaitingInput).toBe(true);
+			expect(json.runId).toBe('r1');
+			expect(json.finalText).toBe('thinking…'); // broke before the trailing text
+		});
+
+		it('does NOT set interactive on a normal spawn', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q', additionalFields: {} },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.runStreaming.mock.calls[0][0].interactive).toBeUndefined();
+		});
+	});
+
+	describe('Send Input', () => {
+		it('forwards runId + text to sendRunInput and returns the delivery result', async () => {
+			mockClient.sendRunInput.mockResolvedValue({ run_id: 'r1', delivered: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'sendInput', runId: 'r1', inputText: 'use the staging DB' },
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.sendRunInput).toHaveBeenCalledWith('r1', 'use the staging DB');
+			const json = result[0][0].json as Record<string, unknown>;
+			expect(json.delivered).toBe(true);
+			expect(json.run_id).toBe('r1');
+		});
+	});
+
+	// ---- RFC BH turn-scoped cancel (loomcycle v1.22) ----
+
+	describe('Cancel Turn', () => {
+		it('Cancel Turn parks a run without terminating it', async () => {
+			mockClient.cancelTurn.mockResolvedValue({ run_id: 'r1', stopped: true, parked: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'cancelTurn', runId: 'r1' },
+			});
+			const result = await node.execute.call(ctx);
+			// No reason given → the options object is omitted entirely, keeping
+			// the request body byte-identical to a bare cancel-turn.
+			expect(mockClient.cancelTurn).toHaveBeenCalledWith('r1', undefined);
+			expect(result[0][0].json).toMatchObject({ parked: true });
+		});
+
+		it('Cancel Turn forwards a reason when supplied', async () => {
+			mockClient.cancelTurn.mockResolvedValue({ run_id: 'r1', stopped: true, parked: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'cancelTurn', runId: 'r1', reason: 'operator changed their mind' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.cancelTurn).toHaveBeenCalledWith('r1', { reason: 'operator changed their mind' });
+		});
+
+		// Cancel Turn and Cancel are different operations against different
+		// endpoints — a regression here would silently kill runs operators only
+		// meant to interrupt.
+		it('Cancel Turn does not call the whole-run cancelAgent', async () => {
+			mockClient.cancelTurn.mockResolvedValue({ run_id: 'r1', stopped: true, parked: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'cancelTurn', runId: 'r1' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.cancelAgent).not.toHaveBeenCalled();
+		});
+	});
+
+	// ---- RFC BJ P4 session replay (loomcycle v1.25) ----
+
+	describe('Replay Session', () => {
+		it('Replay Session omits compress when off', async () => {
+			mockClient.replaySession.mockResolvedValue({ new_session_id: 's2', events_copied: 12 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'replaySession', sourceSessionId: 's1', agent: 'reviewer' },
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.replaySession).toHaveBeenCalledWith('s1', { agent: 'reviewer' });
+			expect(result[0][0].json).toMatchObject({ new_session_id: 's2' });
+		});
+
+		it('Replay Session forwards compress when enabled', async () => {
+			mockClient.replaySession.mockResolvedValue({ new_session_id: 's2' });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'replaySession',
+					sourceSessionId: 's1',
+					agent: 'reviewer',
+					compress: true,
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.replaySession).toHaveBeenCalledWith('s1', { agent: 'reviewer', compress: true });
+		});
+	});
+
+	// ---- RFC BY runnable-agent discovery (loomcycle v1.51) ----
+
+	describe('List Runnable Agents', () => {
+		it('List Runnable Agents returns the tiered listing without a userId', async () => {
+			mockClient.runnableAgents.mockResolvedValue({
+				agents: [{ name: 'researcher', source: 'tenant' }],
+			});
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'listRunnableAgents' },
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.runnableAgents).toHaveBeenCalledWith();
+			expect((result[0][0].json as Record<string, unknown>).agents).toEqual([
+				{ name: 'researcher', source: 'tenant' },
+			]);
+		});
+	});
+
+	// ---- RFC AT vision input (loomcycle v1.7) ----
+
+	describe('Spawn with image input', () => {
+		// base64 of the 3 bytes 0x89 'P' 'N' — content is irrelevant, only the
+		// encoding path matters.
+		const b64 = Buffer.from([0x89, 0x50, 0x4e]).toString('base64');
+
+		it('Spawn appends an image content block after the text block', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'ok' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'describe this',
+					additionalFields: { imageBinaryProperties: 'data' },
+				},
+				binary: { data: { mimeType: 'image/png', data: b64 } },
+			});
+			await node.execute.call(ctx);
+			const content = mockClient.runStreaming.mock.calls[0][0].segments[0].content;
+			expect(content).toHaveLength(2);
+			expect(content[0].type).toBe('trusted-text');
+			// media_type + base64 data, and deliberately NO data: URI prefix —
+			// loomcycle rejects a prefixed payload.
+			expect(content[1]).toEqual({ type: 'image', media_type: 'image/png', data: b64 });
+		});
+
+		it('Spawn reads multiple comma-separated binary properties in order', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'ok' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'compare',
+					additionalFields: { imageBinaryProperties: 'before, after' },
+				},
+				binary: {
+					before: { mimeType: 'image/png', data: b64 },
+					after: { mimeType: 'image/webp', data: b64 },
+				},
+			});
+			await node.execute.call(ctx);
+			const content = mockClient.runStreaming.mock.calls[0][0].segments[0].content;
+			expect(content.map((c: { media_type?: string }) => c.media_type)).toEqual([
+				undefined,
+				'image/png',
+				'image/webp',
+			]);
+		});
+
+		// The no-image path must stay byte-identical to the pre-RFC-AT payload.
+		it('Spawn emits a single text block when no image properties are set', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'ok' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' },
+			});
+			await node.execute.call(ctx);
+			const content = mockClient.runStreaming.mock.calls[0][0].segments[0].content;
+			expect(content).toEqual([{ type: 'trusted-text', text: 'q' }]);
+		});
+
+		// loomcycle errors the run before the provider call for an unsupported
+		// type; refusing locally names the offending property instead.
+		it('Spawn refuses a binary property that is not a supported image type', async () => {
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'run',
+					operation: 'spawn',
+					agent: 'a',
+					prompt: 'q',
+					additionalFields: { imageBinaryProperties: 'doc' },
+				},
+				binary: { doc: { mimeType: 'application/pdf', data: b64 } },
+			});
+			await expect(node.execute.call(ctx)).rejects.toThrow(/application\/pdf/);
+			expect(mockClient.runStreaming).not.toHaveBeenCalled();
+		});
+	});
+
+	// ---- RFC AW budget crossings on the stream (loomcycle v1.11) ----
+
+	describe('Budget limit events', () => {
+		it('Spawn surfaces limit frames as a limits array', async () => {
+			const events = fakeSuccessfulRunEvents({ text: 'ok' });
+			events.splice(1, 0, {
+				type: 'limit',
+				limit: { scope: 'tenant', scope_id: 't1', severity: 'soft', window: 'month', used: 900, limit: 1000 },
+			} as never);
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(events));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' },
+			});
+			const result = await node.execute.call(ctx);
+			const json = result[0][0].json as Record<string, unknown>;
+			expect(json.limits).toEqual([
+				{ scope: 'tenant', scope_id: 't1', severity: 'soft', window: 'month', used: 900, limit: 1000 },
+			]);
+		});
+
+		// Absent rather than an empty array, so a workflow can branch on
+		// existence and the common case adds no key to the output.
+		it('Spawn omits limits entirely when no budget frame arrives', async () => {
+			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'ok' })));
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' },
+			});
+			const result = await node.execute.call(ctx);
+			expect(result[0][0].json).not.toHaveProperty('limits');
 		});
 	});
 });

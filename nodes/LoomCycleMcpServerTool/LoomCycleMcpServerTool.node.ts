@@ -292,7 +292,10 @@ async function runMcpServerOp(
 	const runOpts: RunOptions = {
 		agent: captures.agent,
 		segments: buildSegments(args.prompt, true), // model-supplied prompt → untrusted
-		allowedTools: [captures.allowedToolGlob],
+		// loomcycle v1.13.0 renamed the run body's `allowed_tools` to `tools`.
+		// This narrows the spawned run to just this MCP server's tool family, so
+		// a silent drop here would widen it to the agent's whole ceiling.
+		tools: [captures.allowedToolGlob],
 	};
 	if (captures.userIdDefault) runOpts.userId = captures.userIdDefault;
 	if (captures.userTierDefault) runOpts.userTier = captures.userTierDefault;

@@ -7,6 +7,13 @@ import type {
 } from 'n8n-workflow';
 import { LoomcycleClient } from '@loomcycle/client';
 
+type LoomcycleCtx =
+	| IExecuteFunctions
+	| ILoadOptionsFunctions
+	| IPollFunctions
+	| ITriggerFunctions
+	| ISupplyDataFunctions;
+
 /**
  * Build a LoomcycleClient from the n8n credential. Treats the credential
  * object as opaque — only the base URL + bearer leave this helper, and
@@ -15,7 +22,7 @@ import { LoomcycleClient } from '@loomcycle/client';
  * Every action / trigger / cluster node uses this to construct its client.
  */
 export async function getClient(
-	ctx: IExecuteFunctions | ILoadOptionsFunctions | IPollFunctions | ITriggerFunctions | ISupplyDataFunctions,
+	ctx: LoomcycleCtx,
 ): Promise<LoomcycleClient> {
 	const creds = await ctx.getCredentials('loomCycleApi');
 	const baseUrl = String(creds.baseUrl ?? '').trim();
@@ -32,7 +39,7 @@ export async function getClient(
  * credential `userId` / `userTier` when the per-node parameter is empty.
  */
 export async function getCredentialDefault(
-	ctx: IExecuteFunctions | ILoadOptionsFunctions | IPollFunctions | ITriggerFunctions | ISupplyDataFunctions,
+	ctx: LoomcycleCtx,
 	field: 'userId' | 'userTier' | 'mcpUrl',
 ): Promise<string> {
 	const creds = await ctx.getCredentials('loomCycleApi');

@@ -98,7 +98,7 @@ describe('LoomCycleMcpServerTool', () => {
 	});
 
 	describe('returned tool', () => {
-		it('invoke spawns a sub-agent with mcp__<name>__* in allowed_tools', async () => {
+		it('invoke spawns a sub-agent narrowed to mcp__<name>__* via the renamed tools field', async () => {
 			mockClient.mcpServerDef.mockResolvedValueOnce({ name: 'slack-mcp' });
 			mockClient.runStreaming.mockReturnValue(
 				asAsyncIterable([
@@ -114,7 +114,11 @@ describe('LoomCycleMcpServerTool', () => {
 			expect(mockClient.runStreaming).toHaveBeenCalledOnce();
 			const runArg = mockClient.runStreaming.mock.calls[0][0];
 			expect(runArg.agent).toBe('orchestrator');
-			expect(runArg.allowedTools).toEqual(['mcp__slack-mcp__*']);
+			// loomcycle v1.13.0 renamed `allowed_tools` -> `tools`. This glob is
+			// the sub-agent's privilege boundary: dropping it silently would widen
+			// the run to the agent's entire tool ceiling.
+			expect(runArg.tools).toEqual(['mcp__slack-mcp__*']);
+			expect(runArg.allowedTools).toBeUndefined();
 			expect(runArg.segments[0].content[0].type).toBe('untrusted-block');
 			expect(out).toBe('posted to slack');
 		});
@@ -202,7 +206,11 @@ describe('LoomCycleMcpServerTool', () => {
 			expect(mockClient.runStreaming).toHaveBeenCalledOnce();
 			const runArg = mockClient.runStreaming.mock.calls[0][0];
 			expect(runArg.agent).toBe('orchestrator');
-			expect(runArg.allowedTools).toEqual(['mcp__slack-mcp__*']);
+			// loomcycle v1.13.0 renamed `allowed_tools` -> `tools`. This glob is
+			// the sub-agent's privilege boundary: dropping it silently would widen
+			// the run to the agent's entire tool ceiling.
+			expect(runArg.tools).toEqual(['mcp__slack-mcp__*']);
+			expect(runArg.allowedTools).toBeUndefined();
 			expect(out[0][0].json).toMatchObject({ result: 'posted-to-slack' });
 		});
 	});
