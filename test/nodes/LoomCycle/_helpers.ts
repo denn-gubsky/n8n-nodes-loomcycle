@@ -21,6 +21,13 @@ interface ExecuteContextOptions {
 	credentials?: Record<string, unknown>;
 	continueOnFail?: boolean;
 	inputData?: Array<{ json: Record<string, unknown> }>;
+	/**
+	 * Binary properties available on the input item, keyed by property name.
+	 * `data` is base64 (what n8n's IBinaryData carries). Backs the
+	 * `assertBinaryData` / `getBinaryDataBuffer` helpers the RFC AT vision
+	 * path uses.
+	 */
+	binary?: Record<string, { mimeType?: string; data: string }>;
 }
 
 export function makeExecuteContext(opts: ExecuteContextOptions): IExecuteFunctions {
@@ -50,6 +57,20 @@ export function makeExecuteContext(opts: ExecuteContextOptions): IExecuteFunctio
 		continueOnFail: () => opts.continueOnFail ?? false,
 		helpers: {
 			returnJsonArray: (items: unknown[]) => items,
+			assertBinaryData: (_itemIndex: number, propertyName: string) => {
+				const entry = opts.binary?.[propertyName];
+				if (!entry) {
+					throw new Error(`no binary property "${propertyName}" on item`);
+				}
+				return entry;
+			},
+			getBinaryDataBuffer: async (_itemIndex: number, propertyName: string) => {
+				const entry = opts.binary?.[propertyName];
+				if (!entry) {
+					throw new Error(`no binary property "${propertyName}" on item`);
+				}
+				return Buffer.from(entry.data, 'base64');
+			},
 		},
 	} as unknown as IExecuteFunctions;
 }

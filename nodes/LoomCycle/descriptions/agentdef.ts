@@ -132,51 +132,14 @@ export const agentDefOps: INodeProperties[] = [
 	// default (preserves the pre-existing create behaviour). Selecting
 	// `code-js` marks this as a deterministic JavaScript agent (RFC J).
 	{
-		displayName: 'Provider',
+		displayName: 'Provider Name or ID',
 		name: 'agentProvider',
 		type: 'options',
+		typeOptions: { loadOptionsMethod: 'loadAgentProviders' },
 		default: '',
 		displayOptions: { show: { resource: ['agentDef'], operation: ['create', 'fork'] } },
-		options: [
-			{
-				name: 'Anthropic',
-				value: 'anthropic',
-				description: 'Anthropic Claude models',
-			},
-			{
-				name: 'Code-JS (Deterministic JavaScript)',
-				value: 'code-js',
-				description:
-					'Synthetic provider — the agent runs inline JavaScript instead of an LLM (RFC J). Enter the code below; it is ingested via code_body (loomcycle ≥ v0.20). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
-			},
-			{
-				name: 'DeepSeek',
-				value: 'deepseek',
-				description: 'DeepSeek models',
-			},
-			{
-				name: 'Default (Set via Overlay JSON)',
-				value: '',
-				description: 'Leave the provider unset — configure it in the Overlay JSON below, or let loomcycle apply its default',
-			},
-			{
-				name: 'Google Gemini',
-				value: 'gemini',
-				description: 'Google Gemini models',
-			},
-			{
-				name: 'Ollama',
-				value: 'ollama',
-				description: 'Local Ollama models',
-			},
-			{
-				name: 'OpenAI',
-				value: 'openai',
-				description: 'OpenAI models',
-			},
-		],
 		description:
-			'Optional provider for this agent definition, folded into the overlay as `provider`. Providers are operator-defined in loomcycle.yaml; for any not listed, set `provider` in the Overlay JSON instead. The model still comes from the Overlay JSON (omit it for code-js).',
+			'Optional provider for this agent definition, folded into the overlay as `provider`. The list is read live from the deployment\'s configured cascade (GET /v1/config, loomcycle ≥ v1.38) and always offers Default (unset) plus the synthetic code-js provider. The model still comes from the Overlay JSON (omit it for code-js). Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
 
 	// ---- code-js JavaScript body (Create / Fork, provider=code-js) ----

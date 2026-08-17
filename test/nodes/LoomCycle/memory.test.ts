@@ -13,6 +13,11 @@ const { mockClient } = vi.hoisted(() => ({
 		getMemoryEntry: vi.fn(),
 		setMemoryEntry: vi.fn(),
 		deleteMemoryEntry: vi.fn(),
+		memorySearch: vi.fn(),
+		memoryEmbedStats: vi.fn(),
+		reembedMemory: vi.fn(),
+		backfillEmbeddings: vi.fn(),
+		purgeStaleEmbeddings: vi.fn(),
 		listChannels: vi.fn(),
 		publishChannel: vi.fn(),
 		subscribeChannel: vi.fn(),
@@ -211,5 +216,170 @@ describe('LoomCycle resource=memory', () => {
 		const result = await node.execute.call(ctx);
 		expect(mockClient.deleteMemoryEntry).toHaveBeenCalledWith('s', 'i', 'k');
 		expect(result[0][0].json).toMatchObject({ ok: true, scope: 's', scope_id: 'i', key: 'k' });
+	});
+
+	// ---- RFC BV/BW unified search (loomcycle v1.47 / v1.49) ----
+
+	describe('Search', () => {
+		it('Search maps scopeID onto scopeId and omits unset options', async () => {
+			mockClient.memorySearch.mockResolvedValue({ entries: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'memory', operation: 'search', query: 'where did I note the ship date', scope: 'user', scopeID: 'u1' },
+			});
+			await node.execute.call(ctx);
+			// Exact payload: an omitted topK/sources must not appear, so the
+			// server applies its own defaults (sources omitted = span all planes).
+			expect(mockClient.memorySearch).toHaveBeenCalledWith({
+				query: 'where did I note the ship date',
+				scope: 'user',
+				scopeId: 'u1',
+			});
+		});
+
+		it('Search forwards topK and a parsed sources list', async () => {
+			mockClient.memorySearch.mockResolvedValue({ entries: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'memory',
+					operation: 'search',
+					query: 'q',
+					scope: 'user',
+					scopeID: 'u1',
+					searchOptions: { topK: 5, sources: 'facts, notes , documents' },
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.memorySearch).toHaveBeenCalledWith({
+				query: 'q',
+				scope: 'user',
+				scopeId: 'u1',
+				topK: 5,
+				sources: ['facts', 'notes', 'documents'],
+			});
+		});
+
+		// The substrate rejects this combination with 400 invalid_sources; we
+		// refuse it locally so the operator gets an actionable message instead.
+		it('Search refuses documents combined with only one of facts/notes', async () => {
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'memory',
+					operation: 'search',
+					query: 'q',
+					scope: 'user',
+					scopeID: 'u1',
+					searchOptions: { sources: 'documents, facts' },
+				},
+			});
+			await expect(node.execute.call(ctx)).rejects.toThrow(/independent dimensions/);
+			expect(mockClient.memorySearch).not.toHaveBeenCalled();
+		});
+
+		it('Search accepts documents alone', async () => {
+			mockClient.memorySearch.mockResolvedValue({ entries: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'memory',
+					operation: 'search',
+					query: 'q',
+					scope: 'user',
+					scopeID: 'u1',
+					searchOptions: { sources: 'documents' },
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.memorySearch).toHaveBeenCalledWith(
+				expect.objectContaining({ sources: ['documents'] }),
+			);
+		});
+	});
+
+	// ---- Embedding maintenance (loomcycle v1.46 / v1.47) ----
+
+	describe('Embedding maintenance', () => {
+		it('Embed Stats calls memoryEmbedStats with the scope only', async () => {
+			mockClient.memoryEmbedStats.mockResolvedValue({ models: [] });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'memory', operation: 'embedStats', scope: 'user' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.memoryEmbedStats).toHaveBeenCalledWith('user');
+		});
+
+		// dry_run defaults TRUE server-side. Leaving Commit off must send NO
+		// dryRun key at all, so the server default governs.
+		it('Reembed omits dryRun when Commit is off, leaving the server dry-run default', async () => {
+			mockClient.reembedMemory.mockResolvedValue({ dry_run: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'memory', operation: 'reembed', scope: 'user', scopeID: 'u1' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.reembedMemory).toHaveBeenCalledWith('user', 'u1', {});
+		});
+
+		it('Reembed sends dryRun false only when Commit is on', async () => {
+			mockClient.reembedMemory.mockResolvedValue({ dry_run: false });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'memory', operation: 'reembed', scope: 'user', scopeID: 'u1', commit: true },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.reembedMemory).toHaveBeenCalledWith('user', 'u1', { dryRun: false });
+		});
+
+		// reembedMemory has no prefix parameter — only backfill / purge do, so a
+		// configured prefix must not leak into the reembed call.
+		it('Reembed drops the prefix option, which its endpoint does not accept', async () => {
+			mockClient.reembedMemory.mockResolvedValue({ dry_run: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'memory',
+					operation: 'reembed',
+					scope: 'user',
+					scopeID: 'u1',
+					maintenanceOptions: { prefix: 'notes/', maxRows: 250 },
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.reembedMemory).toHaveBeenCalledWith('user', 'u1', { limit: 250 });
+		});
+
+		it('Backfill Embeddings forwards prefix and maxRows as limit', async () => {
+			mockClient.backfillEmbeddings.mockResolvedValue({ dry_run: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'memory',
+					operation: 'backfillEmbeddings',
+					scope: 'user',
+					scopeID: 'u1',
+					commit: true,
+					maintenanceOptions: { prefix: 'notes/', maxRows: 100 },
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.backfillEmbeddings).toHaveBeenCalledWith('user', 'u1', {
+				dryRun: false,
+				limit: 100,
+				prefix: 'notes/',
+			});
+		});
+
+		it('Purge Stale Embeddings defaults to a dry run', async () => {
+			mockClient.purgeStaleEmbeddings.mockResolvedValue({ dry_run: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'memory', operation: 'purgeStaleEmbeddings', scope: 'user', scopeID: 'u1' },
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.purgeStaleEmbeddings).toHaveBeenCalledWith('user', 'u1', {});
+		});
 	});
 });

@@ -14,6 +14,8 @@ import type {
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
+	MemorySearchInput,
+	MemorySource,
 	PathToolInput,
 	RegisterHookOptions,
 	RunBatchOptions,
@@ -26,7 +28,7 @@ import type {
 
 import { getClient, getCredentialDefault } from './helpers/client';
 import { wrapLoomcycleError } from './helpers/errors';
-import { buildSegments } from './helpers/segments';
+import { buildSegments, readImageParts } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
 
 /**
@@ -139,9 +141,14 @@ async function executeRun(
 		const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
 		const userTier = userTierParam || (await getCredentialDefault(ctx, 'userTier'));
 
+		// RFC AT (v1.7): optional vision input read off the item's binary
+		// properties and base64'd into `image` content blocks. No images
+		// configured → buildSegments emits exactly what it always did.
+		const images = await readImageParts(ctx, i, additionalFields.imageBinaryProperties);
+
 		const runOpts: RunOptions = {
 			agent,
-			segments: buildSegments(prompt, treatPromptAsUntrusted),
+			segments: buildSegments(prompt, treatPromptAsUntrusted, images),
 		};
 		if (userId) runOpts.userId = userId;
 		if (userTier) runOpts.userTier = userTier;
@@ -172,8 +179,12 @@ async function executeRun(
 			runOpts.runTimeoutSeconds = additionalFields.runTimeoutSeconds;
 		}
 
+		// loomcycle v1.13.0 renamed the run body's `allowed_tools` to `tools`
+		// (RunOptions.allowedTools → RunOptions.tools). The n8n PARAMETER keeps
+		// its original name so saved workflows keep resolving — only the wire
+		// field moved.
 		const allowedTools = parseCsv(additionalFields.allowedTools as string);
-		if (allowedTools !== undefined) runOpts.allowedTools = allowedTools;
+		if (allowedTools !== undefined) runOpts.tools = allowedTools;
 		const allowedHosts = parseCsv(additionalFields.allowedHosts as string);
 		if (allowedHosts !== undefined) runOpts.allowedHosts = allowedHosts;
 		const webSearchFilter = additionalFields.webSearchFilter;
@@ -216,6 +227,40 @@ async function executeRun(
 		const reason = ctx.getNodeParameter('reason', i, '') as string;
 		const result = await client.cancelAgent(agentId, reason ? { reason } : undefined);
 		return result as unknown as IDataObject;
+	}
+
+	if (operation === 'cancelTurn') {
+		// RFC BH (v1.22): stop the CURRENT turn of a live interactive run and
+		// park it at awaiting_input — the "Esc" gesture. Distinct from Cancel,
+		// which terminates the whole run: session + transcript stay intact and
+		// the run is steerable again via Send Input.
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const reason = ctx.getNodeParameter('reason', i, '') as string;
+		const resp = await client.cancelTurn(runId, reason ? { reason } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'replaySession') {
+		// RFC BJ P4 (v1.25): replay a session's transcript into a NEW session
+		// bound to a (possibly different) agent, which then continues from the
+		// same context. Returns the fresh session_id to continue with.
+		const sourceSessionId = ctx.getNodeParameter('sourceSessionId', i) as string;
+		const agent = ctx.getNodeParameter('agent', i) as string;
+		const compress = ctx.getNodeParameter('compress', i, false) as boolean;
+		const resp = await client.replaySession(sourceSessionId, {
+			agent,
+			...(compress ? { compress: true } : {}),
+		});
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listRunnableAgents') {
+		// RFC BY (v1.51): the agents THIS caller may run, tiered server-side by
+		// access mode (bundled / tenant-shared / own). Gated on runs:read, so a
+		// delegated per-user token reaches it where the operator-scoped Library
+		// listing would 403.
+		const resp = await client.runnableAgents();
+		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'listAgents') {
@@ -354,6 +399,79 @@ async function executeMemory(
 		await client.deleteMemoryEntry(scope, scopeID, key);
 		// Adapter returns void on 204; surface a consistent ok envelope for n8n
 		return { ok: true, scope, scope_id: scopeID, key } as IDataObject;
+	}
+
+	if (operation === 'search') {
+		// RFC BV/BW (v1.47 / v1.49): off-run unified semantic search spanning
+		// k/v entries AND document-chunk bodies in one ranked list. Each hit is
+		// tagged `kind` — "fact" | "note" | "document" (it was "memory" |
+		// "document" before v1.49.0).
+		const query = ctx.getNodeParameter('query', i) as string;
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const searchOptions = ctx.getNodeParameter('searchOptions', i, {}) as IDataObject;
+
+		const input: MemorySearchInput = { query, scope, scopeId: scopeID };
+		if (typeof searchOptions.topK === 'number' && searchOptions.topK > 0) {
+			input.topK = searchOptions.topK;
+		}
+		// Omitted `sources` spans every plane. The substrate REFUSES
+		// (400 invalid_sources) when "documents" is combined with exactly one
+		// of facts/notes, so validate here rather than surfacing a raw 400.
+		const sources = parseCsv(searchOptions.sources) as MemorySource[] | undefined;
+		if (sources !== undefined && sources.length > 0) {
+			const hasDocuments = sources.includes('documents');
+			const provenanceCount = ['facts', 'notes'].filter((s) =>
+				sources.includes(s as MemorySource),
+			).length;
+			if (hasDocuments && provenanceCount === 1) {
+				throw new NodeOperationError(
+					ctx.getNode(),
+					'Sources cannot combine "documents" with only one of "facts"/"notes" — the namespace and the provenance split are independent dimensions. Use facts, notes, facts+notes, documents, or all three.',
+					{ itemIndex: i },
+				);
+			}
+			input.sources = sources;
+		}
+		const resp = await client.memorySearch(input);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'embedStats') {
+		// Per-(provider, model, dimension) row counts for one scope — how you
+		// spot a multi-embedder scope BEFORE running a reembed migration.
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const resp = await client.memoryEmbedStats(scope);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'reembed' || operation === 'backfillEmbeddings' || operation === 'purgeStaleEmbeddings') {
+		// The three embedding-maintenance ops share a shape: (scope, scopeId)
+		// plus a dry-run gate. `dry_run` defaults TRUE server-side and we keep
+		// that default here — Purge Stale in particular DELETES embeddings, so
+		// committing has to be an explicit operator act, never the fallback.
+		const scope = ctx.getNodeParameter('scope', i) as string;
+		const scopeID = ctx.getNodeParameter('scopeID', i) as string;
+		const commit = ctx.getNodeParameter('commit', i, false) as boolean;
+		const maintenanceOptions = ctx.getNodeParameter('maintenanceOptions', i, {}) as IDataObject;
+
+		const opts: { dryRun?: boolean; limit?: number; prefix?: string } = {};
+		if (commit) opts.dryRun = false;
+		if (typeof maintenanceOptions.maxRows === 'number' && maintenanceOptions.maxRows > 0) {
+			opts.limit = maintenanceOptions.maxRows;
+		}
+
+		if (operation === 'reembed') {
+			// reembedMemory takes no prefix filter — only backfill / purge do.
+			const resp = await client.reembedMemory(scope, scopeID, opts);
+			return resp as unknown as IDataObject;
+		}
+		if (maintenanceOptions.prefix) opts.prefix = maintenanceOptions.prefix as string;
+		const resp =
+			operation === 'backfillEmbeddings'
+				? await client.backfillEmbeddings(scope, scopeID, opts)
+				: await client.purgeStaleEmbeddings(scope, scopeID, opts);
+		return resp as unknown as IDataObject;
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown memory operation: ${operation}`);
@@ -1089,6 +1207,20 @@ async function executeInterruption(
 		const resolvedBy = ctx.getNodeParameter('resolvedBy', i, '') as string;
 		const resp = await client.resolveInterrupt(runId, interruptId, {
 			answer,
+			...(resolvedBy ? { resolvedBy } : {}),
+		});
+		return { result: resp ?? { ok: true } } as IDataObject;
+	}
+
+	if (operation === 'decline') {
+		// RFC BH P2 (v1.22): decline a pending ask WITHOUT answering it. The
+		// agent's waiting Question tool returns a non-error "declined" result
+		// and the run continues — unlike Resolve, which supplies an answer, and
+		// unlike Cancel, which kills the run.
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const interruptId = ctx.getNodeParameter('interruptId', i) as string;
+		const resolvedBy = ctx.getNodeParameter('resolvedBy', i, '') as string;
+		const resp = await client.cancelInterrupt(runId, interruptId, {
 			...(resolvedBy ? { resolvedBy } : {}),
 		});
 		return { result: resp ?? { ok: true } } as IDataObject;

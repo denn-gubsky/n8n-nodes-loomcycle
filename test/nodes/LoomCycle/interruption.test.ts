@@ -6,6 +6,7 @@ const { mockClient } = vi.hoisted(() => ({
 		listUserInterrupts: vi.fn(),
 		listRunInterrupts: vi.fn(),
 		resolveInterrupt: vi.fn(),
+		cancelInterrupt: vi.fn(),
 		health: vi.fn(),
 	},
 }));
@@ -110,6 +111,41 @@ describe('LoomCycle resource=interruption', () => {
 				params: { resource: 'interruption', operation: 'resolve', runId: 'r1', interruptId: 'i', answer: 'a' },
 			});
 			const result = await node.execute.call(ctx);
+			expect((result[0][0].json as Record<string, unknown>).result).toEqual({ ok: true });
+		});
+	});
+
+	// ---- RFC BH P2 decline (loomcycle v1.22) ----
+
+	describe('Decline', () => {
+		it('Decline calls cancelInterrupt rather than resolveInterrupt', async () => {
+			mockClient.cancelInterrupt.mockResolvedValue({ declined: true });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'interruption', operation: 'decline', runId: 'r1', interruptId: 'int_7' },
+			});
+			const result = await node.execute.call(ctx);
+			// No answer is supplied — declining is distinct from answering, and
+			// routing it through resolveInterrupt would send an empty answer.
+			expect(mockClient.cancelInterrupt).toHaveBeenCalledWith('r1', 'int_7', {});
+			expect(mockClient.resolveInterrupt).not.toHaveBeenCalled();
+			expect((result[0][0].json as Record<string, unknown>).result).toEqual({ declined: true });
+		});
+
+		it('Decline forwards resolvedBy attribution when supplied', async () => {
+			mockClient.cancelInterrupt.mockResolvedValue(undefined);
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'interruption',
+					operation: 'decline',
+					runId: 'r1',
+					interruptId: 'int_7',
+					resolvedBy: 'ops-oncall',
+				},
+			});
+			const result = await node.execute.call(ctx);
+			expect(mockClient.cancelInterrupt).toHaveBeenCalledWith('r1', 'int_7', { resolvedBy: 'ops-oncall' });
 			expect((result[0][0].json as Record<string, unknown>).result).toEqual({ ok: true });
 		});
 	});
