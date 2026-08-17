@@ -2,6 +2,37 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] — 2026-08-17
+
+**Minor release (full edition).** Mirrors slim-edition **3.13.0** (chunked-graph Documents + the RFC CC verified-writes fact tier) and adds the two langchain **Tool sub-nodes** the slim edition cannot ship. **26 → 31 nodes.**
+
+### Added — mirrored from slim 3.13.0
+
+- **LoomCycle Document node** (36 ops, RFC AK + BS / BO / CE, loomcycle ≥ v1.4) — document + chunk lifecycle, edges and discovery, tags, types, `Query Chunks` with a validator-gated SQL escape hatch, per-chunk history / version / diff, Markdown + JSON Canvas IO, image assets, peer federation.
+- **LoomCycle Fact node** (10 ops, RFC CC, ≥ v1.54) — including the full **bi-temporal** surface: Valid At / Invalid At on writes, As Of / Include Retired on reads, Class and Confidence, plus Hops / Seed Chunk IDs on Graph Recall.
+- **LoomCycle Document Source node** (`documentSourceDef`, RFC CE, ≥ v1.54).
+- The three wire corrections and the fourth filter correction found against a live v1.55 during Phase 2 carry over intact: `reorder_chunk` takes a relative `direction`, `supersede_chunk` takes two IDs and no content, `upsert_chunk` requires `document_id`, and `list_facts` filters on `type` / `class` — never on `subject`.
+
+### Added — full-edition only
+
+- **LoomCycle Document Tool** — read, search and author documents from inside an agent loop.
+- **LoomCycle Fact Tool** — record and recall verified facts, with an **Allow Writes** toggle for a read-only recall posture.
+
+Neither can exist in the slim edition: `@n8n/ai-node-sdk` supports Chat Models and Memory but has **no tool-supply API**, so a community Tool sub-node must be built on `@langchain/core` — which n8n Cloud's scanner bans outright.
+
+### Notable design decisions
+
+- **The Tool sub-nodes expose curated subsets, not parity.** A tool's schema is part of the model's prompt: 36 Document ops with ~30 conditional fields would burn context and invite malformed calls. The Document Tool covers read / search / append; delete, federation sync, canvas import and type definition stay operator-only on the action node.
+- **Three Fact ops are withheld from the agent on integrity grounds, not for brevity.** `judge_fact` is the substrate's verification mechanism — letting the agent that wrote a fact also rule it supported collapses the check into self-attestation. `supersede_chunk` pairs two chunk IDs, and a mis-pairing silently rewrites history. `propose_entity` is already inert until an operator accepts it, so a tool loop mostly generates queue noise. `remember` **is** exposed, because recording what a person just told you is exactly what a conversational agent is placed to do.
+- **`Default Scope` defaults to `user`, and the field says why.** Anything written to `tenant` is read by every user and agent in it, so a fact an agent derived from untrusted input does not belong there.
+- **`Allow Writes` exists because a fact an agent writes becomes evidence later reasoning trusts.** A read-only recall tool is the right posture when the agent processes untrusted input.
+- **Read-only refusals are thrown inside `fn`, not encoded by narrowing the Zod enum**, so a blocked attempt returns a message the model can read and adapt to rather than a parse failure it cannot interpret.
+- **Field omission is preserved in the Tool path too.** An absent `tags` means *unchanged* while `[]` means *clear*, so a defaulted empty array would let a model wipe a chunk's tags as a side effect of an unrelated body edit.
+
+### Preserved — full-edition divergences
+
+`Run → Wait for Completion` and its `sleep()` helper, the four pre-existing langchain Tool sub-nodes, the langchain Chat Model, and the SSE / long-poll triggers. Re-verified after the mirror that `@n8n/ai-node-sdk` is absent from both source imports and `dist/`, and that `@langchain/core` stays confined to `nodes/_shared/`.
+
 ## [2.13.0] — 2026-08-17
 
 **Minor release (full edition).** Catches the full edition up from `@loomcycle/client@^0.34.0` to **`^1.55.0`** in one release, mirroring slim-edition **3.10.0 → 3.12.0**. The full edition had fallen three phases behind; this closes the gap. **24 → 26 nodes**.

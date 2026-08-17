@@ -40,7 +40,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Twenty-four nodes (16 action + 3 trigger + 5 cluster sub-nodes) plus one credential type.
+Thirty-one nodes (21 action + 3 trigger + 7 cluster sub-nodes) plus one credential type.
 
 ### Credential
 
@@ -68,6 +68,9 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
 - **LoomCycle Volume** — `Create` / `Get` / `List` / `List Ephemeral` / `Delete` / `Purge` — filesystem Volumes (RFC AH; requires loomcycle ≥ v1.1). Provision named ro/rw filesystem roots for agents (the runtime derives the on-disk path); since v1.1 a Volume is the only way an agent gets filesystem access. `Delete` unmaps but keeps the files; `Purge` removes the tree.
 - **LoomCycle Path** — `Resolve` / `List` / `Stat` / `Make Directory` / `Move` / `Remove` — the Path VFS (RFC AL; requires loomcycle ≥ v1.4): a Unix-like filesystem naming Memory entries / Volume mounts / Documents by human-readable path (e.g. `/docs/launch`). Scope (agent / user / tenant) resolves server-side from the bearer.
+- **LoomCycle Document** — 36 ops over the chunked-graph Document store (RFC AK + BS / BO / CE; requires loomcycle ≥ v1.4 **and SQL Memory**). Document + chunk lifecycle, edges and discovery, tags, types, `Query Chunks` (structured filters, `Under Path`, or a validator-gated read-only SQL escape hatch), per-chunk `History` / `Get Version` / `Diff Revisions`, Markdown and **JSON Canvas** import-export, image assets, and peer federation.
+- **LoomCycle Fact** — 10 ops over the RFC CC verified-writes tier (loomcycle ≥ v1.54). A fact stores the exact **source span** it came from and a write-time judge checks the claim against it; a failing fact is **withheld, not deleted**. Bi-temporal throughout: **Valid At** / **Invalid At** record when a fact was true in the world, and **As Of** answers as of a past instant.
+- **LoomCycle Document Source** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register a peer loomcycle instance as a document source (RFC CE; ≥ v1.54). Operator-admin only; the overlay carries `api_key_env`, a name rather than a secret.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -84,6 +87,8 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Channel Tool** — Channel publish + peek as agent tools.
 - **LoomCycle Sub-Agent Tool** — delegates to a configured loomcycle agent (drains `runStreaming`); the agent receives the parent's tool-call prompt and returns its `finalText`.
 - **LoomCycle MCP Server Tool** — **strategic differentiator.** Drag onto a canvas → the substrate auto-registers the MCP server via `MCPServerDef` (idempotent ensure: `get` → `create` on `NotFoundError`) → returns a tool that spawns a loomcycle agent with `allowed_tools: ['mcp__<name>__*']`. `cleanupOnEnd: false` default — registrations persist across executions for stable agentic teams.
+- **LoomCycle Document Tool** — read, search and author documents from inside an agent loop. A **curated subset** of the action node's 36 ops: a tool schema is part of the model's prompt, so the destructive and administrative ops (delete, federation sync, canvas import, type definition) stay operator-only. A configurable **Default Scope** keeps writes off the shared `tenant` store by default.
+- **LoomCycle Fact Tool** — record and recall verified facts, with an **Allow Writes** toggle for a read-only recall posture. Three ops are deliberately withheld: `judge_fact` (an agent ruling on its own fact collapses the substrate's integrity check into self-attestation), `supersede_chunk` (a two-ID pairing whose mistake silently rewrites history) and `propose_entity` (already inert until an operator accepts, so a tool loop just generates queue noise). `remember` **is** exposed — recording what a person just told you is exactly what a conversational agent is placed to do.
 
 ## Configure the credential
 
@@ -221,6 +226,11 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
 | Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
 | Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
+| **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node + Document Tool — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
+| Document image assets (RFC BO) | **v1.30** | Document → Set Asset / Get Asset |
+| Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |
+| **Verified writes / fact tier** (RFC CC) | **v1.54** | Fact node + Fact Tool — source spans, verdicts, bi-temporal recall |
+| **Remote document sources** (RFC CE) | **v1.54** | Document Source node; Document → Set Remote / Sync / Diff Remote |
 | **Interactive run steering** (RFC AI) — `Run → Send Input` + Spawn's *Interactive Session* | **v1.1.1** | push operator turns into a run parked at `end_turn` |
 | **Filesystem Volumes** (RFC AH) — Volume node | **v1.1** | named ro/rw filesystem roots; the only way an agent gets filesystem access since v1.1 |
 | **Path VFS** (RFC AL) — Path node | **v1.4** | name Memory / Volumes / Documents by human-readable path |

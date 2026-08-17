@@ -16,3 +16,6 @@ export { operatorTokenDefOps } from './operatortokendef';
 export { snapshotOps } from './snapshot';
 export { volumeOps } from './volume';
 export { pathOps } from './path';
+export { documentOps } from './document';
+export { factOps } from './fact';
+export { documentSourceDefOps } from './documentsourcedef';

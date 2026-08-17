@@ -11,6 +11,7 @@ import type {
 	HookPhase,
 	InterruptStatus,
 	CreateSnapshotOptions,
+	DocumentToolInput,
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
@@ -96,6 +97,12 @@ export async function executeLoomCycle(
 				row = await executeVolume(ctx, client, operation, i);
 			} else if (resource === 'path') {
 				row = await executePath(ctx, client, operation, i);
+			} else if (resource === 'document') {
+				row = await executeDocument(ctx, client, operation, i);
+			} else if (resource === 'fact') {
+				row = await executeFact(ctx, client, operation, i);
+			} else if (resource === 'documentSourceDef') {
+				row = await executeDocumentSourceDef(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1145,6 +1152,291 @@ async function executePath(
 }
 
 /**
+ * Chunked-graph Documents (RFC AK + BS/BO/CE). Op-discriminated passthrough to
+ * `client.document(...)`, assembled per-op so an unset field never reaches the
+ * wire — the substrate distinguishes "absent" from "empty" in several places
+ * (tags omitted = unchanged vs `[]` = clear; revision omitted = no concurrency
+ * guard), so blanket-sending every parameter would change behaviour.
+ *
+ * Set Asset / Get Asset carry binary rather than JSON, so they are handled
+ * outside the generic assembly.
+ */
+async function executeDocument(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const scope = ctx.getNodeParameter('scope', i, 'user') as DocumentToolInput['scope'];
+	const input: DocumentToolInput = { op: operation as DocumentToolInput['op'], scope };
+
+	const str = (name: string): string => (ctx.getNodeParameter(name, i, '') as string).trim();
+	const num = (name: string): number => ctx.getNodeParameter(name, i, 0) as number;
+
+	// ---- Identifiers ----
+	const id = str('id');
+	if (id) input.id = id;
+	const path = str('path');
+	if (path) input.path = path;
+	const documentId = str('documentId');
+	if (documentId) input.document_id = documentId;
+	const parentId = str('parentId');
+	if (parentId) input.parent_id = parentId;
+	// after_id overrides parent_id server-side (the parent is implied by the
+	// sibling), so both may be sent and the substrate resolves the precedence.
+	const afterId = str('afterId');
+	if (afterId) input.after_id = afterId;
+	if (operation === 'move_chunk') input.new_parent_id = str('newParentId');
+	if (operation === 'documents_summary') {
+		const documentIds = parseCsv(ctx.getNodeParameter('documentIds', i, '') as unknown);
+		if (documentIds !== undefined) input.document_ids = documentIds;
+	}
+
+	// ---- Content ----
+	const title = str('title');
+	if (title) input.title = title;
+	const body = str('body');
+	if (body) input.body = body;
+	const type = str('type');
+	if (type) input.type = type;
+	const status = str('status');
+	if (status) input.status = status;
+	const fields = parseObjectField(
+		ctx.getNodeParameter('fields', i, '{}') as unknown,
+		ctx.getNode(),
+	);
+	if (fields) input.fields = fields;
+
+	// Tags REPLACE-SET on create/update but are a delta on add/remove_tags. An
+	// empty CSV is therefore omitted rather than sent as [] — sending [] on an
+	// update would silently clear the chunk's tags.
+	const tags = parseCsv(ctx.getNodeParameter('tags', i, '') as unknown);
+	if (tags !== undefined) input.tags = tags;
+	const tag = str('tag');
+	if (tag) input.tag = tag;
+	const tagPrefix = str('tagPrefix');
+	if (tagPrefix) input.tag_prefix = tagPrefix;
+
+	// ---- Reorder is RELATIVE (verified live): the substrate refuses an
+	// absolute `position` with `direction must be "up" or "down"`. ----
+	if (operation === 'reorder_chunk') {
+		input.direction = ctx.getNodeParameter('reorderDirection', i, 'up') as string;
+	}
+
+	// ---- Revisions (0 means "omit", not "revision zero") ----
+	if (operation === 'update_chunk' || operation === 'get_version') {
+		const revision = num('revision');
+		if (revision > 0) input.revision = revision;
+	}
+	if (operation === 'diff') {
+		input.from_revision = num('fromRevision');
+		input.to_revision = num('toRevision');
+	}
+
+	// ---- Edges ----
+	if (operation === 'link_chunks' || operation === 'unlink_chunks') {
+		input.from_id = str('fromId');
+		input.to_id = str('toId');
+	}
+	const kind = str('kind');
+	if (kind) input.kind = kind;
+
+	// ---- Query filters ----
+	const underPath = str('underPath');
+	if (underPath) input.under_path = underPath;
+	const sql = str('sql');
+	if (sql) input.sql = sql;
+	const titleContains = str('titleContains');
+	if (titleContains) input.title_contains = titleContains;
+	const limit = num('limit');
+	if (limit > 0) input.limit = limit;
+
+	// ---- Types ----
+	if (operation === 'define_type') input.name = str('name');
+
+	// ---- Markdown / canvas IO ----
+	if (operation === 'export_md') {
+		input.include_metadata = ctx.getNodeParameter('includeMetadata', i, true) as boolean;
+	}
+	if (operation === 'import_md') input.markdown = str('markdown');
+	if (operation === 'import_canvas') {
+		input.canvas = parseJsonField(ctx.getNodeParameter('canvas', i, '{}') as unknown, {
+			strict: true,
+			node: ctx.getNode(),
+		});
+	}
+
+	// ---- Federation (RFC CE). `source` / `remote_ref` / `direction` are not on
+	// the typed DocumentToolInput yet; they ride its index signature. ----
+	if (operation === 'set_remote') {
+		input.source = str('source');
+		input.remote_ref = str('remoteRef');
+	}
+	if (operation === 'sync') {
+		input.direction = ctx.getNodeParameter('direction', i, 'pull') as string;
+	}
+
+	// ---- Assets (RFC BO): binary in, binary out ----
+	if (operation === 'set_asset') {
+		const prop = str('assetBinaryProperty') || 'data';
+		const meta = ctx.helpers.assertBinaryData(i, prop);
+		const buf = await ctx.helpers.getBinaryDataBuffer(i, prop);
+		input.data = buf.toString('base64');
+		if (meta.mimeType) input.media_type = meta.mimeType;
+		// Prefer an explicit filename, else carry through whatever the upstream
+		// node attached to the binary — metadata only either way.
+		const filename = str('assetFilename') || meta.fileName || '';
+		if (filename) input.filename = filename;
+	}
+
+	const resp = await client.document(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * The RFC CC fact tier. Same wire method as {@link executeDocument} — split by
+ * audience, not by transport: these ops make or check a CLAIM ABOUT A SUBJECT,
+ * and a fact is distinguished from a plain chunk on the wire by carrying
+ * `subject` + `type`.
+ *
+ * `judged_at` / `judged_by` are deliberately absent: the substrate stamps them
+ * and accepts no wire field, so a caller cannot launder a machine verdict into
+ * an operator one.
+ */
+async function executeFact(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const scope = ctx.getNodeParameter('scope', i, 'user') as DocumentToolInput['scope'];
+	const input: DocumentToolInput = { op: operation as DocumentToolInput['op'], scope };
+
+	const str = (name: string): string => (ctx.getNodeParameter(name, i, '') as string).trim();
+
+	const subject = str('subject');
+	if (subject) input.subject = subject;
+	const type = str('type');
+	if (type) input.type = type;
+	const naturalKey = str('naturalKey');
+	if (naturalKey) input.natural_key = naturalKey;
+
+	// Supersede is a pure link between TWO existing chunks (verified live): `id`
+	// is the REPLACEMENT and `supersedes_id` the retired one, and it accepts no
+	// body/subject/type. Judge uses its own id field so the two cannot be
+	// confused in the UI.
+	if (operation === 'supersede_chunk') {
+		input.id = str('id');
+		input.supersedes_id = str('supersedesId');
+	}
+	if (operation === 'judge_fact') {
+		const judgeId = str('judgeId');
+		if (judgeId) input.id = judgeId;
+	}
+
+	const title = str('title');
+	if (title) input.title = title;
+	const body = str('body');
+	if (body) input.body = body;
+	const sourceQuote = str('sourceQuote');
+	if (sourceQuote) input.source_quote = sourceQuote;
+	const documentId = str('documentId');
+	if (documentId) input.document_id = documentId;
+	const query = str('query');
+	if (query) input.query = query;
+
+	if (operation === 'judge_fact') {
+		input.verdict = ctx.getNodeParameter('verdict', i, 'supported') as DocumentToolInput['verdict'];
+		// The substrate requires a reason, so a verdict always carries its
+		// justification. Fail here rather than surfacing an opaque 4xx.
+		const reason = str('reason');
+		if (!reason) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Reason is required for Judge Fact — the substrate refuses a verdict without one.',
+				{ itemIndex: i },
+			);
+		}
+		input.reason = reason;
+	}
+
+	if (operation === 'remember') input.text = str('text');
+
+	if (operation === 'list_facts' || operation === 'graph_recall') {
+		if (ctx.getNodeParameter('includeRefuted', i, false) as boolean) input.include_refuted = true;
+	}
+
+	// ---- Bi-temporal write fields. The substrate takes unix NANOSECONDS; the
+	// node exposes n8n dateTime pickers and converts, because hand-authoring
+	// nanos in a workflow expression is a needless footgun. ----
+	if (operation === 'upsert_chunk' || operation === 'remember') {
+		const factOptions = ctx.getNodeParameter('factOptions', i, {}) as IDataObject;
+		if (factOptions.class) input.class = factOptions.class as string;
+		// 0 is "omit", not "zero confidence" — the substrate treats an absent
+		// confidence differently from an asserted 0.
+		if (typeof factOptions.confidence === 'number' && factOptions.confidence > 0) {
+			input.confidence = factOptions.confidence;
+		}
+		const validAt = toUnixNanos(factOptions.validAt, 'Valid At', ctx, i);
+		if (validAt !== undefined) input.valid_at = validAt;
+		const invalidAt = toUnixNanos(factOptions.invalidAt, 'Invalid At', ctx, i);
+		if (invalidAt !== undefined) input.invalid_at = invalidAt;
+	}
+
+	// ---- Bi-temporal reads: answer as of a past instant, and optionally
+	// include facts since superseded. ----
+	if (operation === 'list_facts') {
+		// Verified live: List Facts filters on TYPE (with subtype expansion) and
+		// CLASS. `subject` is accepted but silently ignored, so the node does not
+		// offer it here — an ignored filter reads as a broken one.
+		const classFilter = str('classFilter');
+		if (classFilter) input.class = classFilter;
+	}
+
+	if (operation === 'list_facts' || operation === 'graph_recall') {
+		const recallOptions = ctx.getNodeParameter('recallOptions', i, {}) as IDataObject;
+		const asOf = toUnixNanos(recallOptions.asOf, 'As Of', ctx, i);
+		if (asOf !== undefined) input.as_of = asOf;
+		if (recallOptions.includeRetired === true) input.include_retired = true;
+	}
+
+	if (operation === 'graph_recall') {
+		const graphOptions = ctx.getNodeParameter('graphOptions', i, {}) as IDataObject;
+		// hops 0 is meaningful (starting chunks only), so it is sent whenever the
+		// operator set it at all — unlike confidence, where 0 means "unset".
+		if (typeof graphOptions.hops === 'number') input.hops = graphOptions.hops;
+		const seedIds = parseCsv(graphOptions.seedIds);
+		if (seedIds !== undefined) input.seed_ids = seedIds;
+	}
+
+	if (operation === 'verbatim_answer') {
+		const minScore = ctx.getNodeParameter('minScore', i, 0) as number;
+		if (minScore > 0) input.min_score = minScore;
+	}
+
+	const limit = ctx.getNodeParameter('limit', i, 0) as number;
+	if (limit > 0) input.limit = limit;
+
+	const resp = await client.document(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * DocumentSourceDef admin (RFC CE) — a faithful mirror of MemoryBackendDef, so
+ * it reuses the shared op-discriminated substrate-input builder verbatim.
+ */
+async function executeDocumentSourceDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.documentSourceDef(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
  * Pre/post-tool webhook registration. `registerHook` makes loomcycle POST
  * hook payloads to a consumer-run callback URL (typically an n8n Webhook
  * trigger node). `owner` defaults to the node id so re-runs are idempotent
@@ -1375,6 +1667,35 @@ function collectNameValuePairs(raw: unknown, key: string): Record<string, string
 }
 
 // ---- Local helpers ----
+
+/**
+ * Convert an n8n `dateTime` parameter to the unix NANOSECONDS the bi-temporal
+ * fact tier expects (RFC CC). Returns undefined for an empty value so the field
+ * is omitted rather than sent as 0 — the substrate reads an absent `valid_at` as
+ * "now" and an absent `invalid_at` as "still true", both of which differ sharply
+ * from the epoch.
+ *
+ * Milliseconds → nanoseconds is exact (×1e6), so no precision is invented; the
+ * node simply cannot express sub-millisecond instants, which no n8n picker
+ * produces anyway.
+ */
+function toUnixNanos(
+	raw: unknown,
+	label: string,
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+): number | undefined {
+	if (raw === undefined || raw === null || raw === '') return undefined;
+	const ms = Date.parse(String(raw));
+	if (Number.isNaN(ms)) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`${label} is not a valid date/time: "${String(raw)}". Use the date picker or an ISO-8601 string.`,
+			{ itemIndex },
+		);
+	}
+	return ms * 1_000_000;
+}
 
 function parseCsv(raw: unknown): string[] | undefined {
 	if (typeof raw !== 'string' || raw.trim() === '') return undefined;

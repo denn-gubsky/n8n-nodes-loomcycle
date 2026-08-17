@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+  <title>LoomCycle Document Tool</title>
+  <rect x="2.75" y="2.75" width="54.5" height="54.5" rx="12" fill="#FAF8F3" stroke="#56C596" stroke-width="1.5"/>
+  <g fill="none" stroke="#56C596" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 15 H34 L40 21 V45 H22 Z"/>
+    <path d="M34 15 V21 H40"/>
+    <path d="M26 28 H36"/>
+    <path d="M26 34 H36"/>
+  </g>
+  <circle cx="44" cy="44" r="7.5" fill="#FAF8F3" stroke="#56C596" stroke-width="1.5"/>
+  <path d="M41 44 H47 M44 41 V47" fill="none" stroke="#56C596" stroke-width="2" stroke-linecap="round"/>
+</svg>
