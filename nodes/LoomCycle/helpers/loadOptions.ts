@@ -281,3 +281,37 @@ export async function loadMemoryScopes(this: ILoadOptionsFunctions): Promise<INo
 		return [failedToLoadOption('scopes', err)];
 	}
 }
+
+/**
+ * List the teams visible to the caller via GET /v1/_teamdef/names (RFC AP,
+ * loomcycle ≥ v1.17.1). Backs the name dropdown on the Team node's Fork /
+ * Delete / Render Diagram / Run ops.
+ *
+ * `names` arrives as a Go nil-slice — null rather than [] when empty — so the
+ * nullish guard is load-bearing, not defensive noise. Each option is badged with
+ * its version roll-up so an operator can tell a team with an unpromoted fork
+ * from one whose latest version is live.
+ */
+export async function loadTeams(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.listTeams();
+		const entries = [...(resp.names ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
+			return [{ name: '— no teams defined; create one or type a name manually —', value: '' }];
+		}
+		return entries.map((t) => {
+			const parts: string[] = [];
+			if (typeof t.latest_version === 'number') parts.push(`latest v${t.latest_version}`);
+			if (typeof t.version_count === 'number') {
+				parts.push(`${t.version_count} version${t.version_count === 1 ? '' : 's'}`);
+			}
+			// Worth surfacing: a retired active pointer means name-addressed Run
+			// and Render Diagram have nothing live to resolve to.
+			if (t.active_retired === true) parts.push('active version retired');
+			return { name: t.name, value: t.name, description: parts.join(' · ') };
+		});
+	} catch (err) {
+		return [failedToLoadOption('teams', err)];
+	}
+}
