@@ -2,6 +2,37 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.0] — 2026-08-17
+
+**Minor release.** Agent Teams (RFC AP) — the closest analogue loomcycle has to an n8n workflow, now designable and runnable from the canvas. Phase 3 of the v1.55 catch-up. **25 → 26 nodes.**
+
+### Added
+
+- **LoomCycle Team node** (7 ops, RFC AP, loomcycle ≥ v1.17.1):
+  - **List** (`listTeams`) — every visible team with its version roll-up. Backs a new `loadTeams` dropdown badged with `latest vN`, the version count, and a warning when the active version is retired.
+  - **Get** (`getTeamDef`) — one version's full record including its editable graph.
+  - **Create** (`createTeam`) / **Fork** (`forkTeam`) — author a workflow graph: `entry`, `states` (each `{state, handler}` with handler kind **agent** / **parallel** / **consolidator** / **terminal**), `transitions` (`{from, to, on}`), plus optional `max_iterations` and presentation-only `colors`. Validated server-side before any write.
+  - **Delete** (`deleteTeam`) — every version plus the active pointer.
+  - **Run** (`runTeam`) — walk the graph by name (active version) or by `def_id` (an exact version). Optionally bind a **Document chunk task board**: each transition persists `chunk.status`, so progress is durable and a later Run **resumes** from it.
+  - **Render Diagram** (`renderTeamDiagram`) — Mermaid `stateDiagram-v2`, optionally highlighting one state.
+
+### Verified against a live loomcycle v1.55 before implementing
+
+Probing the substrate first this time, rather than after:
+
+- **Handler kinds are `agent` / `parallel` / `consolidator` / `terminal`.** A plausible-looking `single` is refused with `unknown handler kind "single"`. The overlay is operator-authored JSON, so the field description now names the four explicitly.
+- **`create` promotes by default; `fork` does NOT** (`promoted: false` in the response). Confirmed the consequence: `render_diagram` by name resolved to v1, the promoted version, while the v2 fork stayed invisible to name addressing.
+- Graph validation genuinely runs pre-write, so a bad graph is refused rather than stored.
+
+### Notable design decisions
+
+- **Team does not reuse `buildSubstrateInput`.** Unlike every other Def family, the adapter exposes seven *typed* methods here rather than one op-discriminated call, so the executor calls them directly.
+- **`Fork` ships with an in-node notice, not silence.** Because the adapter has no `promote` wrapper, a fork is only reachable by `def_id` — so `Run` gained a **Target By** selector (name → active version, or def_id → an exact version) and the Fork op carries a notice explaining the situation. Shipping Fork without that would have produced versions operators could not use and could not explain.
+- **`names` is normalised from `null` to `[]`.** The wire returns a Go nil-slice when empty; normalising once here spares every downstream expression a null check. Both the executor and `loadTeams` handle it, each with a test.
+- **`boardScope` is never sent alone.** It qualifies a board chunk, so without one it is meaningless — omitted rather than defaulted.
+- **The overlay is parsed strictly.** A JSON typo fails in the node naming itself, instead of arriving as a server-side complaint about a graph the operator never meant to send.
+- **`promote` / `retire` / `verify` are absent, not hand-rolled.** They have no adapter method; a local HTTP call would violate the single-wire-egress rule. Recorded in the README's new "Known upstream gaps" section along with `render_diagram`'s overlay preview / `format` and `run`'s `interrupt_on_cap`.
+
 ## [3.13.0] — 2026-08-17
 
 **Minor release.** Surfaces loomcycle's chunked-graph **Document** store and the RFC CC **verified-writes fact tier** — the single largest unsurfaced substrate family in the v1.55 catch-up. Phase 2 of the v1.55 catch-up. **22 → 25 nodes.**
