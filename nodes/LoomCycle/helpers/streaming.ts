@@ -1,4 +1,4 @@
-import type { AgentEvent, Usage } from '@loomcycle/client';
+import type { AgentEvent, LimitInfo, Usage } from '@loomcycle/client';
 
 /**
  * Result of draining a runStreaming() iterable into a single n8n output.
@@ -26,6 +26,17 @@ export interface RunDrainResult {
 	 * stop on the `awaiting_input` frame — see `stopOnAwaitingInput`.
 	 */
 	awaitingInput?: boolean;
+	/**
+	 * Token-budget crossings the substrate reported during this run (RFC AW,
+	 * loomcycle ≥ v1.11). A `severity: "soft"` entry is a warning and the run
+	 * continues; `"hard"` means the NEXT run is refused at admission. Collected
+	 * as an array because more than one can fire — a soft warning at run start
+	 * and a further crossing mid-run are separate frames.
+	 *
+	 * Present only when at least one `limit` frame arrived, so a workflow can
+	 * branch on its existence rather than comparing counts.
+	 */
+	limits?: LimitInfo[];
 }
 
 /**
@@ -56,6 +67,7 @@ export async function drainRunStream(
 	let runId: string | undefined;
 	let awaitingInput: boolean | undefined;
 	let errorMessage: string | undefined;
+	const limits: LimitInfo[] = [];
 
 	for await (const ev of stream) {
 		if (ev.type === 'text' && typeof ev.text === 'string') {
@@ -77,6 +89,9 @@ export async function drainRunStream(
 		if (ev.type === 'error' || ev.is_error === true) {
 			errorMessage = ev.error ?? 'unknown error from loomcycle';
 		}
+		if (ev.type === 'limit' && ev.limit) {
+			limits.push(ev.limit);
+		}
 		if (ev.type === 'awaiting_input') {
 			awaitingInput = true;
 			if (opts.stopOnAwaitingInput) break;
@@ -87,5 +102,14 @@ export async function drainRunStream(
 		throw new Error(errorMessage);
 	}
 
-	return { finalText, usage, stopReason, sessionId, agentId, runId, awaitingInput };
+	return {
+		finalText,
+		usage,
+		stopReason,
+		sessionId,
+		agentId,
+		runId,
+		awaitingInput,
+		...(limits.length > 0 ? { limits } : {}),
+	};
 }

@@ -8,6 +8,8 @@ const { mockClient } = vi.hoisted(() => ({
 		cancelAgent: vi.fn(),
 		listUserAgents: vi.fn(),
 		listLibraryAgents: vi.fn(),
+		runnableAgents: vi.fn(),
+		getConfig: vi.fn(),
 		listLibrarySkills: vi.fn(),
 		listLibraryMcpServers: vi.fn(),
 		listMemoryScopes: vi.fn(),
@@ -31,7 +33,13 @@ vi.mock('@loomcycle/client', async (importActual) => {
 	return { ...actual, LoomcycleClient: vi.fn(() => mockClient) };
 });
 
-import { loadAgents, loadChannels, loadMcpLibrary, loadMemoryScopes } from '../../../nodes/LoomCycle/helpers/loadOptions';
+import {
+	loadAgentProviders,
+	loadAgents,
+	loadChannels,
+	loadMcpLibrary,
+	loadMemoryScopes,
+} from '../../../nodes/LoomCycle/helpers/loadOptions';
 import { makeLoadOptionsContext } from './_helpers';
 
 describe('loadOptions — SECURITY: error messages are bearer-redacted before reaching the UI', () => {
@@ -188,5 +196,85 @@ describe('loadOptions — SECURITY: error messages are bearer-redacted before re
 		const ctx = makeLoadOptionsContext({});
 		const out = await loadMemoryScopes.call(ctx);
 		expect(out.map((o) => o.name)).toEqual(['agent', 'user']);
+	});
+});
+
+// The Library lives on the operator def-plane, so a DELEGATED per-user token
+// (RFC BX) is refused there while still holding runs:read. Without the
+// fallback the agent dropdown is permanently empty for member credentials.
+describe('loadAgents — delegated-token fallback to runnableAgents (RFC BY)', () => {
+	it('falls back to the runnable-agent listing when the Library read fails', async () => {
+		mockClient.listLibraryAgents.mockRejectedValue(new Error('403 forbidden'));
+		mockClient.runnableAgents.mockResolvedValue({
+			agents: [
+				{ name: 'summariser', source: 'tenant' },
+				{ name: 'bundled-helper', source: 'bundled' },
+			],
+		});
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgents.call(ctx);
+		expect(out.map((o) => o.value)).toEqual(['bundled-helper', 'summariser']);
+		expect(out[0].description).toBe('bundled');
+	});
+
+	it('prefers the Library when it succeeds and never calls the fallback', async () => {
+		mockClient.listLibraryAgents.mockResolvedValue({
+			entries: [{ name: 'researcher', source: 'both', latest_version: 2, version_count: 2 }],
+		});
+		mockClient.runnableAgents.mockReset();
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgents.call(ctx);
+		expect(out.map((o) => o.value)).toEqual(['researcher']);
+		expect(mockClient.runnableAgents).not.toHaveBeenCalled();
+	});
+
+	// When BOTH fail the operator needs the Library diagnostic, not the
+	// fallback's — the Library is the path they configured the node for.
+	it('reports the Library error when the fallback also fails', async () => {
+		mockClient.listLibraryAgents.mockRejectedValue(new Error('library exploded'));
+		mockClient.runnableAgents.mockRejectedValue(new Error('fallback exploded'));
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgents.call(ctx);
+		expect(out).toHaveLength(1);
+		expect(out[0].name).toContain('library exploded');
+		expect(out[0].name).not.toContain('fallback exploded');
+	});
+
+	it('returns an instructional placeholder when the fallback list is empty', async () => {
+		mockClient.listLibraryAgents.mockRejectedValue(new Error('403'));
+		mockClient.runnableAgents.mockResolvedValue({ agents: [] });
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgents.call(ctx);
+		expect(out).toHaveLength(1);
+		expect(out[0].value).toBe('');
+		expect(out[0].name).toContain('no runnable agents');
+	});
+});
+
+describe('loadAgentProviders — live provider cascade plus synthetic entries', () => {
+	it('prepends the unset default and synthetic code-js ahead of live providers', async () => {
+		mockClient.getConfig.mockResolvedValue({
+			providers: [
+				{ provider: 'openai', active: false },
+				{ provider: 'anthropic', active: true },
+			],
+		});
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgentProviders.call(ctx);
+		expect(out.map((o) => o.value)).toEqual(['', 'code-js', 'anthropic', 'openai']);
+		// Inactive providers stay selectable — an operator may author against a
+		// provider they are about to enable — but are badged as such.
+		expect(out[2].description).toBe('active');
+		expect(out[3].description).toBe('configured, not active');
+	});
+
+	// code-js is gated by an env var, not the provider cascade, and it drives
+	// the conditional code-body editor. Losing it on a config failure would make
+	// authoring a code agent impossible.
+	it('still offers the unset default and code-js when the config read fails', async () => {
+		mockClient.getConfig.mockRejectedValue(new Error('config unavailable'));
+		const ctx = makeLoadOptionsContext({});
+		const out = await loadAgentProviders.call(ctx);
+		expect(out.map((o) => o.value)).toEqual(['', 'code-js']);
 	});
 });
