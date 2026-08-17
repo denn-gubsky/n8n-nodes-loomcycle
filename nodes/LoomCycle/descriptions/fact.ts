@@ -120,7 +120,7 @@ export const factOps: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				resource: ['fact'],
-				operation: ['upsert_chunk', 'supersede_chunk', 'list_facts', 'remember', 'propose_entity'],
+				operation: ['upsert_chunk', 'list_facts', 'remember', 'propose_entity'],
 			},
 		},
 		description:
@@ -134,7 +134,7 @@ export const factOps: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				resource: ['fact'],
-				operation: ['upsert_chunk', 'supersede_chunk', 'list_facts', 'remember', 'propose_entity'],
+				operation: ['upsert_chunk', 'list_facts', 'remember', 'propose_entity'],
 			},
 		},
 		description:
@@ -148,7 +148,7 @@ export const factOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { resource: ['fact'], operation: ['upsert_chunk', 'supersede_chunk', 'judge_fact'] },
+			show: { resource: ['fact'], operation: ['upsert_chunk', 'judge_fact'] },
 		},
 		description:
 			'Stable identity for the fact. Upserting twice with the same key updates ONE chunk instead of accumulating duplicates. On Judge Fact it is an alternative to Chunk ID.',
@@ -159,7 +159,7 @@ export const factOps: INodeProperties[] = [
 		type: 'string',
 		typeOptions: { rows: 3 },
 		default: '',
-		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk', 'supersede_chunk'] } },
+		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk'] } },
 		description: 'The claim itself',
 	},
 	{
@@ -168,7 +168,7 @@ export const factOps: INodeProperties[] = [
 		type: 'string',
 		typeOptions: { rows: 3 },
 		default: '',
-		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk', 'supersede_chunk'] } },
+		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk'] } },
 		description:
 			'The exact span of source text the claim was drawn from. This is what the write-time judge checks the claim against, so a fact written without one cannot be verified — and from loomcycle v1.55.1 only an OPERATOR may vouch for a span-less fact, never an agent.',
 	},
@@ -177,27 +177,54 @@ export const factOps: INodeProperties[] = [
 		name: 'title',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk', 'supersede_chunk'] } },
+		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk'] } },
 		description: 'Short label for the fact — what graph recall matches titles against',
 	},
 	{
+		// REQUIRED, verified against a live loomcycle v1.55: an upsert without it
+		// is refused with `create_chunk: missing required field: document_id`.
+		// A fact is still a chunk, so it has to live in a document.
 		displayName: 'Document ID',
 		name: 'documentId',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk', 'supersede_chunk'] } },
-		description: 'Document to file the fact under. Omit to let the substrate place it.',
+		required: true,
+		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk'] } },
+		description: 'Document to file the fact under. Required — a fact is a chunk, so it must live in a document.',
 	},
 
-	// ---- Supersede: which fact is being corrected ----
+	// ---- Supersede: TWO ids. Verified live — the substrate refuses each in
+	// turn if absent ("missing required field: supersedes_id (the chunk being
+	// retired)", then "missing required field: id (the REPLACEMENT chunk)").
+	// Supersede is a pure link between two existing chunks: write the corrected
+	// fact first with Upsert Fact, then point this at both. ----
 	{
-		displayName: 'Chunk ID',
+		displayName: 'Replacement Chunk ID',
 		name: 'id',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['fact'], operation: ['supersede_chunk', 'judge_fact'] } },
+		required: true,
+		displayOptions: { show: { resource: ['fact'], operation: ['supersede_chunk'] } },
 		description:
-			'The fact being superseded / judged. On Supersede the original is retained as history — corrections build a chain rather than overwriting. On Judge Fact you may pass Natural Key instead.',
+			'The NEW chunk that replaces the old one — create it first with Upsert Fact and pass the ID it returns. Supersede only links the pair; it does not accept a body.',
+	},
+	{
+		displayName: 'Supersedes Chunk ID',
+		name: 'supersedesId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['fact'], operation: ['supersede_chunk'] } },
+		description:
+			'The OLD chunk being retired. It is not deleted — it stays queryable so a question about an earlier point in time still has an answer.',
+	},
+	{
+		displayName: 'Chunk ID',
+		name: 'judgeId',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['fact'], operation: ['judge_fact'] } },
+		description: 'The fact being judged. You may pass Natural Key instead.',
 	},
 
 	// ---- Judge ----

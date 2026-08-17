@@ -427,13 +427,20 @@ export const documentOps: INodeProperties[] = [
 
 	// ---- Position / revisions ----
 	{
-		displayName: 'Position',
-		name: 'position',
-		type: 'number',
-		default: 0,
-		typeOptions: { minValue: 0 },
+		// Verified against a live loomcycle v1.55: reorder_chunk takes a
+		// DIRECTION, not an absolute index — passing `position` is refused with
+		// `direction must be "up" or "down"`.
+		displayName: 'Direction',
+		name: 'reorderDirection',
+		type: 'options',
+		default: 'up',
+		required: true,
 		displayOptions: { show: { resource: ['document'], operation: ['reorder_chunk'] } },
-		description: 'Zero-based sibling position under the current parent',
+		options: [
+			{ name: 'Up', value: 'up' },
+			{ name: 'Down', value: 'down' },
+		],
+		description: 'Move the chunk one place up or down among its siblings. Reordering is relative — there is no absolute-index form.',
 	},
 	{
 		displayName: 'Revision',

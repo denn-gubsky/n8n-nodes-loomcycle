@@ -34,6 +34,20 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 - **Refuted facts are withheld, not deleted.** *Include Refuted* is off by default so a workflow consumes verified facts; turn it on to audit what failed rather than to treat it as truth.
 - **`api_key_env` carries a name, not a secret.** The Document Source overlay references the peer bearer by env-var name, resolved at use time; plaintext never travels this wire path.
 
+### Verified against a live loomcycle v1.55 — three wire shapes corrected
+
+Driving each op through the `document` MCP meta-tool before trusting the typed adapter surface caught three payloads that would have failed on **every** call. `DocumentToolInput` is a loose passthrough with an index signature, so none of them were type errors:
+
+- **`reorder_chunk` is RELATIVE, not absolute.** It takes `direction: up | down`; an absolute `position` is refused with `direction must be "up" or "down"`. The node now exposes a Direction selector.
+- **`supersede_chunk` takes TWO ids and no content.** `id` is the **replacement** chunk and `supersedes_id` the retired one — the substrate refuses each in turn if absent. It is a pure link between two existing chunks, so the corrected fact is written first with Upsert Fact. The original single-`id` field also had the semantics backwards.
+- **`upsert_chunk` requires `document_id`.** A fact is still a chunk, so it must live in a document; without it the op fails with `create_chunk: missing required field: document_id`. It was documented as optional.
+
+Confirmed correct in the same pass: omitted `tags` leave a chunk's tags **unchanged** (the update returned them intact), a stale `revision` returns `revision conflict (you passed 1, current is 2)`, `include_metadata: false` yields clean prose with no HTML comments, and `judge_fact` refuses a verdict with no reason.
+
+### Known coverage gaps
+
+The fact tier is **bi-temporal** and this release does not yet surface it: `valid_at` / `invalid_at` (when a fact was true in the world, distinct from when it was recorded), `as_of` (answer as of a past instant), `include_retired`, plus `class` (derived / evidential), `confidence`, and `hops` / `seed_ids` on Graph Recall. Also unexposed: `after_id` on Create Chunk, `document_ids` on Documents Summary, `filename` on Set Asset. None block the ops that ship here.
+
 ### Requires
 
 Every Document and Fact op needs **SQL Memory** on the sidecar (`LOOMCYCLE_SQLMEM_ENABLED=1`) and refuses without it. `scope: tenant` additionally requires the operator to have granted **both** `memory_scopes` and `sql_scopes` with `tenant`.

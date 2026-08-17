@@ -159,16 +159,29 @@ describe('LoomCycle resource=document', () => {
 			});
 		});
 
-		it('Reorder Chunk sends position zero rather than omitting it', async () => {
+		// Verified against a live loomcycle v1.55: reorder is RELATIVE. Sending an
+		// absolute `position` is refused with `direction must be "up" or "down"`,
+		// so a position-based node would have failed on every call.
+		it('Reorder Chunk sends a relative direction, never an absolute position', async () => {
 			mockClient.document.mockResolvedValue({});
 			const node = new LoomCycle();
 			const ctx = makeExecuteContext({
-				params: { resource: 'document', operation: 'reorder_chunk', scope: 'user', id: 'c2', position: 0 },
+				params: {
+					resource: 'document',
+					operation: 'reorder_chunk',
+					scope: 'user',
+					id: 'c2',
+					reorderDirection: 'down',
+				},
 			});
 			await node.execute.call(ctx);
-			// Position 0 is a legitimate destination (first sibling), unlike
-			// revision 0 — so it must survive the omit-when-empty pass.
-			expect(mockClient.document.mock.calls[0][0].position).toBe(0);
+			expect(mockClient.document).toHaveBeenCalledWith({
+				op: 'reorder_chunk',
+				scope: 'user',
+				id: 'c2',
+				direction: 'down',
+			});
+			expect(mockClient.document.mock.calls[0][0]).not.toHaveProperty('position');
 		});
 	});
 

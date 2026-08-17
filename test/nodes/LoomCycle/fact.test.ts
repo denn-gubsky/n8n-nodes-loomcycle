@@ -34,18 +34,23 @@ describe('LoomCycle resource=fact', () => {
 				subject: 'alice',
 				type: 'person',
 				naturalKey: 'alice/timezone',
+				documentId: 'd1',
 				title: 'Timezone',
 				body: 'Alice works in CET.',
 				sourceQuote: 'I am based in Berlin, so CET.',
 			},
 		});
 		await node.execute.call(ctx);
+		// document_id is REQUIRED (verified live): a fact is still a chunk, so an
+		// upsert without it is refused with
+		// `create_chunk: missing required field: document_id`.
 		expect(mockClient.document).toHaveBeenCalledWith({
 			op: 'upsert_chunk',
 			scope: 'user',
 			subject: 'alice',
 			type: 'person',
 			natural_key: 'alice/timezone',
+			document_id: 'd1',
 			title: 'Timezone',
 			body: 'Alice works in CET.',
 			source_quote: 'I am based in Berlin, so CET.',
@@ -90,7 +95,7 @@ describe('LoomCycle resource=fact', () => {
 				resource: 'fact',
 				operation: 'judge_fact',
 				scope: 'user',
-				id: 'f1',
+				judgeId: 'f1',
 				verdict: 'unsupported',
 				reason: 'the span does not mention a timezone',
 			},
@@ -114,7 +119,7 @@ describe('LoomCycle resource=fact', () => {
 				resource: 'fact',
 				operation: 'judge_fact',
 				scope: 'user',
-				id: 'f1',
+				judgeId: 'f1',
 				verdict: 'supported',
 			},
 		});
@@ -132,7 +137,7 @@ describe('LoomCycle resource=fact', () => {
 				resource: 'fact',
 				operation: 'judge_fact',
 				scope: 'user',
-				id: 'f1',
+				judgeId: 'f1',
 				verdict: 'supported',
 				reason: 'quoted verbatim',
 			},
@@ -141,6 +146,33 @@ describe('LoomCycle resource=fact', () => {
 		const arg = mockClient.document.mock.calls[0][0];
 		expect(arg).not.toHaveProperty('judged_at');
 		expect(arg).not.toHaveProperty('judged_by');
+	});
+
+	// Verified live: supersede_chunk takes TWO ids and no content — `id` is the
+	// REPLACEMENT chunk, `supersedes_id` the retired one. The substrate refuses
+	// each in turn if absent, so the original single-id shape failed every call.
+	it('Supersede Fact links the replacement to the retired chunk and sends no body', async () => {
+		mockClient.document.mockResolvedValue({ id: 'f2', supersedes: 'f1' });
+		const node = new LoomCycleFact();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'fact',
+				operation: 'supersede_chunk',
+				scope: 'user',
+				id: 'f2',
+				supersedesId: 'f1',
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.document).toHaveBeenCalledWith({
+			op: 'supersede_chunk',
+			scope: 'user',
+			id: 'f2',
+			supersedes_id: 'f1',
+		});
+		const arg = mockClient.document.mock.calls[0][0];
+		expect(arg).not.toHaveProperty('body');
+		expect(arg).not.toHaveProperty('source_quote');
 	});
 
 	it('Remember sends the statement as text', async () => {

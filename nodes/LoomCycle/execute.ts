@@ -1184,8 +1184,13 @@ async function executeDocument(
 	const tagPrefix = str('tagPrefix');
 	if (tagPrefix) input.tag_prefix = tagPrefix;
 
-	// ---- Positions + revisions (0 means "omit", not "revision zero") ----
-	if (operation === 'reorder_chunk') input.position = num('position');
+	// ---- Reorder is RELATIVE (verified live): the substrate refuses an
+	// absolute `position` with `direction must be "up" or "down"`. ----
+	if (operation === 'reorder_chunk') {
+		input.direction = ctx.getNodeParameter('reorderDirection', i, 'up') as string;
+	}
+
+	// ---- Revisions (0 means "omit", not "revision zero") ----
 	if (operation === 'update_chunk' || operation === 'get_version') {
 		const revision = num('revision');
 		if (revision > 0) input.revision = revision;
@@ -1278,8 +1283,20 @@ async function executeFact(
 	if (type) input.type = type;
 	const naturalKey = str('naturalKey');
 	if (naturalKey) input.natural_key = naturalKey;
-	const id = str('id');
-	if (id) input.id = id;
+
+	// Supersede is a pure link between TWO existing chunks (verified live): `id`
+	// is the REPLACEMENT and `supersedes_id` the retired one, and it accepts no
+	// body/subject/type. Judge uses its own id field so the two cannot be
+	// confused in the UI.
+	if (operation === 'supersede_chunk') {
+		input.id = str('id');
+		input.supersedes_id = str('supersedesId');
+	}
+	if (operation === 'judge_fact') {
+		const judgeId = str('judgeId');
+		if (judgeId) input.id = judgeId;
+	}
+
 	const title = str('title');
 	if (title) input.title = title;
 	const body = str('body');
