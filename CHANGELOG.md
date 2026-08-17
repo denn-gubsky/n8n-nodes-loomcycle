@@ -2,6 +2,42 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.0] — 2026-08-17
+
+**Minor release.** Surfaces loomcycle's chunked-graph **Document** store and the RFC CC **verified-writes fact tier** — the single largest unsurfaced substrate family in the v1.55 catch-up. Phase 2 of the v1.55 catch-up. **22 → 25 nodes.**
+
+`client.document(...)` carries 46 ops. Rather than one unusable operation picker, they are split by **audience**: a Document op edits structure, a Fact op makes or checks a claim about a subject. Both hit the same wire method — what distinguishes a fact on the wire is that it carries `subject` + `type`, which is how the substrate's ontology gate tells them apart.
+
+### Added
+
+- **LoomCycle Document node** (36 ops, RFC AK + BS / BO / CE, loomcycle ≥ v1.4):
+  - **Documents** — Create (optionally naming it in the Path tree) / Get (by ID or path) / Documents Summary / Query Documents / Delete / Set Path.
+  - **Chunks** — Create / Get / Update / Delete / Move (cycle-guarded) / Reorder.
+  - **Edges + discovery (RFC BS)** — Link / Unlink / Get Edges, plus **Backlinks**, **Related** (vector-near) and **Unlinked Mentions**.
+  - **Tags (RFC BS)** — Add / Remove / List. Nested with `/`.
+  - **Types** — Define Type / List Types.
+  - **Query Chunks** — structured filters (document / type / status / tag / tag prefix / `Under Path`) **or** a raw read-only `SELECT` escape hatch, gated by the SQL Memory statement validator.
+  - **Per-chunk versions (RFC BS)** — History / Get Version / Diff Revisions (unified diff).
+  - **Import / export** — Markdown (round-trippable by default) and **JSON Canvas**, the format Obsidian Canvas uses.
+  - **Image assets (RFC BO)** — Set Asset takes an n8n binary property and base64-encodes it with its media type.
+  - **Federation (RFC CE)** — Set Remote / Sync (pull or push) / **Diff Remote**, the read-only dry run.
+- **LoomCycle Fact node** (10 ops, RFC CC, loomcycle ≥ v1.54) — Remember / Upsert Fact / Supersede Fact / List Facts / Judge Fact / Verbatim Answer / Verification Stats / Graph Recall / Propose Entity / Search.
+- **LoomCycle Document Source node** (`documentSourceDef`, RFC CE, loomcycle ≥ v1.54) — Create / Fork / Get / List Versions / Retire. Operator-admin only; reuses the shared op-discriminated `buildSubstrateInput` path.
+
+### Notable design decisions
+
+- **Split by audience, not by transport.** One 46-op node would have been unnavigable, and the two halves have genuinely different users: someone authoring a document tree versus someone recording and auditing claims.
+- **Absent is not empty.** The executor assembles each op's payload field by field, because the substrate distinguishes the two in load-bearing places: `tags` omitted means *unchanged* while `[]` means *clear*, and `revision` omitted means *no concurrency guard*. Blanket-sending every parameter would silently clear tags on an update. Tests assert omission as strongly as inclusion.
+- **`position: 0` survives; `revision: 0` does not.** Position zero is a legitimate destination (first sibling); revision zero means "no optimistic-concurrency guard". Both are 0 in the UI and must diverge on the wire.
+- **`include_metadata: false` is sent explicitly** on Export Markdown — it is meaningful (clean human prose that does *not* round-trip), so dropping it as falsy would silently change the output.
+- **Judge Fact refuses locally without a reason.** The substrate requires one; failing in the node names the missing field instead of surfacing an opaque 4xx. And `judged_at` / `judged_by` are deliberately absent from the node — the substrate stamps them and accepts no wire field, because a caller able to set them could launder a machine verdict into an operator one. A test locks their absence.
+- **Refuted facts are withheld, not deleted.** *Include Refuted* is off by default so a workflow consumes verified facts; turn it on to audit what failed rather than to treat it as truth.
+- **`api_key_env` carries a name, not a secret.** The Document Source overlay references the peer bearer by env-var name, resolved at use time; plaintext never travels this wire path.
+
+### Requires
+
+Every Document and Fact op needs **SQL Memory** on the sidecar (`LOOMCYCLE_SQLMEM_ENABLED=1`) and refuses without it. `scope: tenant` additionally requires the operator to have granted **both** `memory_scopes` and `sql_scopes` with `tenant`.
+
 ## [3.12.0] — 2026-08-17
 
 **Minor release.** Catches the nodes up from `@loomcycle/client@^1.4.0` to **`^1.55.0`** and surfaces the first tranche of what landed upstream in between (37 new adapter methods across 51 minor releases). Phase 1 of the v1.55 catch-up. **Node count unchanged at 22** — these are new operations on existing nodes.

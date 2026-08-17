@@ -11,6 +11,7 @@ import type {
 	HookPhase,
 	InterruptStatus,
 	CreateSnapshotOptions,
+	DocumentToolInput,
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
@@ -96,6 +97,12 @@ export async function executeLoomCycle(
 				row = await executeVolume(ctx, client, operation, i);
 			} else if (resource === 'path') {
 				row = await executePath(ctx, client, operation, i);
+			} else if (resource === 'document') {
+				row = await executeDocument(ctx, client, operation, i);
+			} else if (resource === 'fact') {
+				row = await executeFact(ctx, client, operation, i);
+			} else if (resource === 'documentSourceDef') {
+				row = await executeDocumentSourceDef(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1116,6 +1123,219 @@ async function executePath(
 	}
 
 	const resp = await client.path(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * Chunked-graph Documents (RFC AK + BS/BO/CE). Op-discriminated passthrough to
+ * `client.document(...)`, assembled per-op so an unset field never reaches the
+ * wire — the substrate distinguishes "absent" from "empty" in several places
+ * (tags omitted = unchanged vs `[]` = clear; revision omitted = no concurrency
+ * guard), so blanket-sending every parameter would change behaviour.
+ *
+ * Set Asset / Get Asset carry binary rather than JSON, so they are handled
+ * outside the generic assembly.
+ */
+async function executeDocument(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const scope = ctx.getNodeParameter('scope', i, 'user') as DocumentToolInput['scope'];
+	const input: DocumentToolInput = { op: operation as DocumentToolInput['op'], scope };
+
+	const str = (name: string): string => (ctx.getNodeParameter(name, i, '') as string).trim();
+	const num = (name: string): number => ctx.getNodeParameter(name, i, 0) as number;
+
+	// ---- Identifiers ----
+	const id = str('id');
+	if (id) input.id = id;
+	const path = str('path');
+	if (path) input.path = path;
+	const documentId = str('documentId');
+	if (documentId) input.document_id = documentId;
+	const parentId = str('parentId');
+	if (parentId) input.parent_id = parentId;
+	if (operation === 'move_chunk') input.new_parent_id = str('newParentId');
+
+	// ---- Content ----
+	const title = str('title');
+	if (title) input.title = title;
+	const body = str('body');
+	if (body) input.body = body;
+	const type = str('type');
+	if (type) input.type = type;
+	const status = str('status');
+	if (status) input.status = status;
+	const fields = parseObjectField(
+		ctx.getNodeParameter('fields', i, '{}') as unknown,
+		ctx.getNode(),
+	);
+	if (fields) input.fields = fields;
+
+	// Tags REPLACE-SET on create/update but are a delta on add/remove_tags. An
+	// empty CSV is therefore omitted rather than sent as [] — sending [] on an
+	// update would silently clear the chunk's tags.
+	const tags = parseCsv(ctx.getNodeParameter('tags', i, '') as unknown);
+	if (tags !== undefined) input.tags = tags;
+	const tag = str('tag');
+	if (tag) input.tag = tag;
+	const tagPrefix = str('tagPrefix');
+	if (tagPrefix) input.tag_prefix = tagPrefix;
+
+	// ---- Positions + revisions (0 means "omit", not "revision zero") ----
+	if (operation === 'reorder_chunk') input.position = num('position');
+	if (operation === 'update_chunk' || operation === 'get_version') {
+		const revision = num('revision');
+		if (revision > 0) input.revision = revision;
+	}
+	if (operation === 'diff') {
+		input.from_revision = num('fromRevision');
+		input.to_revision = num('toRevision');
+	}
+
+	// ---- Edges ----
+	if (operation === 'link_chunks' || operation === 'unlink_chunks') {
+		input.from_id = str('fromId');
+		input.to_id = str('toId');
+	}
+	const kind = str('kind');
+	if (kind) input.kind = kind;
+
+	// ---- Query filters ----
+	const underPath = str('underPath');
+	if (underPath) input.under_path = underPath;
+	const sql = str('sql');
+	if (sql) input.sql = sql;
+	const titleContains = str('titleContains');
+	if (titleContains) input.title_contains = titleContains;
+	const limit = num('limit');
+	if (limit > 0) input.limit = limit;
+
+	// ---- Types ----
+	if (operation === 'define_type') input.name = str('name');
+
+	// ---- Markdown / canvas IO ----
+	if (operation === 'export_md') {
+		input.include_metadata = ctx.getNodeParameter('includeMetadata', i, true) as boolean;
+	}
+	if (operation === 'import_md') input.markdown = str('markdown');
+	if (operation === 'import_canvas') {
+		input.canvas = parseJsonField(ctx.getNodeParameter('canvas', i, '{}') as unknown, {
+			strict: true,
+			node: ctx.getNode(),
+		});
+	}
+
+	// ---- Federation (RFC CE). `source` / `remote_ref` / `direction` are not on
+	// the typed DocumentToolInput yet; they ride its index signature. ----
+	if (operation === 'set_remote') {
+		input.source = str('source');
+		input.remote_ref = str('remoteRef');
+	}
+	if (operation === 'sync') {
+		input.direction = ctx.getNodeParameter('direction', i, 'pull') as string;
+	}
+
+	// ---- Assets (RFC BO): binary in, binary out ----
+	if (operation === 'set_asset') {
+		const prop = str('assetBinaryProperty') || 'data';
+		const meta = ctx.helpers.assertBinaryData(i, prop);
+		const buf = await ctx.helpers.getBinaryDataBuffer(i, prop);
+		input.data = buf.toString('base64');
+		if (meta.mimeType) input.media_type = meta.mimeType;
+	}
+
+	const resp = await client.document(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * The RFC CC fact tier. Same wire method as {@link executeDocument} — split by
+ * audience, not by transport: these ops make or check a CLAIM ABOUT A SUBJECT,
+ * and a fact is distinguished from a plain chunk on the wire by carrying
+ * `subject` + `type`.
+ *
+ * `judged_at` / `judged_by` are deliberately absent: the substrate stamps them
+ * and accepts no wire field, so a caller cannot launder a machine verdict into
+ * an operator one.
+ */
+async function executeFact(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const scope = ctx.getNodeParameter('scope', i, 'user') as DocumentToolInput['scope'];
+	const input: DocumentToolInput = { op: operation as DocumentToolInput['op'], scope };
+
+	const str = (name: string): string => (ctx.getNodeParameter(name, i, '') as string).trim();
+
+	const subject = str('subject');
+	if (subject) input.subject = subject;
+	const type = str('type');
+	if (type) input.type = type;
+	const naturalKey = str('naturalKey');
+	if (naturalKey) input.natural_key = naturalKey;
+	const id = str('id');
+	if (id) input.id = id;
+	const title = str('title');
+	if (title) input.title = title;
+	const body = str('body');
+	if (body) input.body = body;
+	const sourceQuote = str('sourceQuote');
+	if (sourceQuote) input.source_quote = sourceQuote;
+	const documentId = str('documentId');
+	if (documentId) input.document_id = documentId;
+	const query = str('query');
+	if (query) input.query = query;
+
+	if (operation === 'judge_fact') {
+		input.verdict = ctx.getNodeParameter('verdict', i, 'supported') as DocumentToolInput['verdict'];
+		// The substrate requires a reason, so a verdict always carries its
+		// justification. Fail here rather than surfacing an opaque 4xx.
+		const reason = str('reason');
+		if (!reason) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Reason is required for Judge Fact — the substrate refuses a verdict without one.',
+				{ itemIndex: i },
+			);
+		}
+		input.reason = reason;
+	}
+
+	if (operation === 'remember') input.text = str('text');
+
+	if (operation === 'list_facts' || operation === 'graph_recall') {
+		if (ctx.getNodeParameter('includeRefuted', i, false) as boolean) input.include_refuted = true;
+	}
+
+	if (operation === 'verbatim_answer') {
+		const minScore = ctx.getNodeParameter('minScore', i, 0) as number;
+		if (minScore > 0) input.min_score = minScore;
+	}
+
+	const limit = ctx.getNodeParameter('limit', i, 0) as number;
+	if (limit > 0) input.limit = limit;
+
+	const resp = await client.document(input);
+	return { result: resp } as IDataObject;
+}
+
+/**
+ * DocumentSourceDef admin (RFC CE) — a faithful mirror of MemoryBackendDef, so
+ * it reuses the shared op-discriminated substrate-input builder verbatim.
+ */
+async function executeDocumentSourceDef(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input = buildSubstrateInput(ctx, operation, i);
+	const resp = await client.documentSourceDef(input);
 	return { result: resp } as IDataObject;
 }
 
