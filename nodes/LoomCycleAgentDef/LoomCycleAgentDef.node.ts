@@ -1,6 +1,7 @@
 import type { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 import { executeLoomCycle } from '../LoomCycle/execute';
+import { loadAgentProviders } from '../LoomCycle/helpers/loadOptions';
 import { agentDefOps } from '../LoomCycle/descriptions';
 
 /**
@@ -25,6 +26,12 @@ export class LoomCycleAgentDef implements INodeType {
 			{ displayName: 'Resource', name: 'resource', type: 'hidden', default: 'agentDef' },
 			...agentDefOps,
 		],
+	};
+
+	methods = {
+		loadOptions: {
+			loadAgentProviders,
+		},
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {

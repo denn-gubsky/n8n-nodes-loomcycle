@@ -2,6 +2,51 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] — 2026-08-17
+
+**Minor release (full edition).** Catches the full edition up from `@loomcycle/client@^0.34.0` to **`^1.55.0`** in one release, mirroring slim-edition **3.10.0 → 3.12.0**. The full edition had fallen three phases behind; this closes the gap. **24 → 26 nodes**.
+
+Bundles three slim phases:
+
+- **slim 3.10.0** — interactive run steering (RFC AI, loomcycle ≥ v1.1.1)
+- **slim 3.11.0** — Volume + Path nodes (RFC AH / RFC AL)
+- **slim 3.12.0** — the v1.55 Phase 1 surface extensions
+
+### Changed — breaking on the wire, not in your workflows
+
+- **`allowed_tools` → `tools`** (loomcycle v1.13.0). Two call sites in this edition, one more than slim: `Run → Spawn` **and** the **MCP Server Tool** cluster sub-node, where the `mcp__<name>__*` glob is the spawned sub-agent's **privilege boundary** — a silent drop would have widened it from one MCP family to the agent's entire tool ceiling. `tsc --noEmit` caught it; both are covered by tests asserting the new field is populated *and* the old one is gone. The n8n **parameter** keeps its name, so saved workflows keep resolving.
+- **`MemorySearchEntry.kind`**: `"memory" | "document"` → `"fact" | "note" | "document"` (loomcycle v1.49.0, RFC BW).
+- **AgentDef Provider dropdown read live** from `GET /v1/config` (≥ v1.38), always offering the unset default plus the synthetic **code-js** provider.
+- **Adapter pin:** `@loomcycle/client` `^0.34.0` → `^1.55.0`.
+
+### Added — from slim 3.10.0 (interactive run steering, RFC AI)
+
+- **`Run → Send Input`** (`sendRunInput`) — push an operator turn into a live interactive run parked at `end_turn`.
+- **`Run → Spawn` Additional Fields: Interactive Session** — start a persistent run that parks for steering; the node returns the `run_id` with `awaitingInput: true` instead of blocking for completion.
+
+### Added — from slim 3.11.0 (Volume + Path)
+
+- **LoomCycle Volume node** (RFC AH, ≥ v1.1) — Create / Get / List / List Ephemeral / Delete / Purge. `Delete` unmaps and keeps the files; `Purge` removes the tree.
+- **LoomCycle Path node** (RFC AL, ≥ v1.4) — Resolve / List / Stat / Make Directory / Move / Remove over the Unix-like VFS naming Memory entries, Volume mounts and Documents.
+
+### Added — from slim 3.12.0 (v1.55 Phase 1)
+
+- **Run** — **Cancel Turn** (RFC BH, ≥ v1.22: park, don't terminate), **Replay Session** (RFC BJ P4, ≥ v1.25), **List Runnable Agents** (RFC BY, ≥ v1.51), **image / vision input** on Spawn (RFC AT, ≥ v1.7), and token-budget crossings folded into the result as `limits[]` (RFC AW, ≥ v1.11).
+- **Memory** — **Search** (RFC BV/BW, ≥ v1.47), **Embed Stats**, **Reembed**, **Backfill Embeddings**, **Purge Stale Embeddings**. The three maintenance ops are **dry-run by default** behind an explicit *Commit* toggle; Purge Stale deletes.
+- **Interruption** — **Decline** (RFC BH P2, ≥ v1.22) — refuse to answer without killing the run.
+- **Agent dropdown now works for delegated user tokens** — `loadAgents` falls back to `runnableAgents()` when the operator-scoped Library read fails.
+
+### Preserved — full-edition divergences, untouched
+
+- **`Run → Wait for Completion`** stays. It needs `setTimeout`, which n8n Cloud's community-node scanner bans — the reason slim has no Wait op. The full edition ships to self-hosted n8n only, so the timer is available; the op, its two parameters and its tests are all retained, now annotated as full-edition-only.
+- **The 4 langchain Tool sub-nodes** (Memory / Channel / Sub-Agent / MCP Server) and the **langchain Chat Model**.
+- **SSE-based Run Completed + long-poll Channel Message triggers.**
+
+### Notable design decisions
+
+- **Mirrored by taking slim's shared action-node layer wholesale, then re-applying full's divergences**, rather than cherry-picking three commits in sequence. The divergence was confined to `execute.ts`, `descriptions/runs.ts`, `helpers/streaming.ts` and `helpers/client.ts`, so a file-level mirror plus a re-applied Wait op was both smaller and easier to verify than three conflict resolutions.
+- **`@n8n/ai-node-sdk` is still absent and `@langchain/core` still present** — the editions' AI layers must never cross, and this was re-verified after the mirror.
+
 ## [2.10.0] — 2026-06-13
 
 **Minor release (full edition).** Runtime snapshot backup / restore from n8n. Mirrors slim-edition 3.9.0. Phase 5 (final) of the v0.34 catch-up. **23 → 24 nodes**.

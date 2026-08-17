@@ -63,6 +63,14 @@ function libraryEntryDescription(entry: LibraryEntry<unknown>): string {
  * Operator-trust scope: the library endpoint is bearer-only (no userId
  * required), so this dropdown works regardless of the credential's
  * Default User ID setting.
+ *
+ * Falls back to `runnableAgents()` (GET /v1/_runnable-agents, RFC BY /
+ * loomcycle v1.51) when the Library read fails. The Library is part of the
+ * operator def-plane, so a DELEGATED per-user token (RFC BX) is refused there
+ * — but that same token holds `runs:read` and so can list what it may actually
+ * run. Without this fallback the agent dropdown is permanently empty for every
+ * member-token credential. The fallback list is lean (name + source, no version
+ * roll-up), which is why it is second rather than first.
  */
 export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 	try {
@@ -82,8 +90,78 @@ export async function loadAgents(this: ILoadOptionsFunctions): Promise<INodeProp
 			value: entry.name,
 			description: libraryEntryDescription(entry),
 		}));
-	} catch (err) {
-		return [failedToLoadOption('agents', err)];
+	} catch (libraryErr) {
+		try {
+			const client = await getClient(this);
+			const resp = await client.runnableAgents();
+			const agents = [...(resp.agents ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+			if (agents.length === 0) {
+				return [{ name: '— no runnable agents for this credential; type the agent name manually —', value: '' }];
+			}
+			return agents.map((a) => ({ name: a.name, value: a.name, description: a.source }));
+		} catch {
+			// Report the LIBRARY error, not the fallback's — the library read is
+			// the operator-facing path and its message is the diagnostic one.
+			return [failedToLoadOption('agents', libraryErr)];
+		}
+	}
+}
+
+/**
+ * The two non-provider entries the AgentDef Provider dropdown must always
+ * offer, regardless of what the deployment reports.
+ *
+ * `''` leaves provider unset so it falls through to the Overlay JSON /
+ * loomcycle's default. `code-js` is a SYNTHETIC provider (RFC J) — the agent
+ * runs inline JavaScript instead of an LLM, so it is gated by
+ * LOOMCYCLE_CODE_AGENTS_ENABLED rather than appearing in the provider cascade,
+ * and it drives the conditional code-body editor via
+ * `displayOptions.show.agentProvider`. Sourcing the list purely from
+ * `getConfig()` would silently remove both.
+ */
+const STATIC_PROVIDER_OPTIONS: INodePropertyOptions[] = [
+	{
+		name: 'Default (Set via Overlay JSON)',
+		value: '',
+		description: 'Leave the provider unset — configure it in the Overlay JSON below, or let loomcycle apply its default',
+	},
+	{
+		name: 'Code-JS (Deterministic JavaScript)',
+		value: 'code-js',
+		description:
+			'Synthetic provider — the agent runs inline JavaScript instead of an LLM (RFC J). Enter the code below; it is ingested via code_body (loomcycle ≥ v0.20). Requires LOOMCYCLE_CODE_AGENTS_ENABLED=1 on the host.',
+	},
+];
+
+/**
+ * List the providers this deployment actually has configured, via GET /v1/config
+ * (loomcycle v1.38), prepended with the two synthetic entries above.
+ *
+ * This replaces a hardcoded five-provider list that could neither reflect a
+ * deployment's real cascade nor name a provider loomcycle gained later.
+ * `getConfig` reports an `active` flag per provider; inactive ones are still
+ * offered (badged), because an operator may legitimately author an AgentDef
+ * against a provider they are about to enable.
+ *
+ * On failure it degrades to the synthetic entries alone rather than an error
+ * placeholder — unset and code-js remain valid choices even when the config
+ * read fails, and the operator can still type a provider via an expression.
+ */
+export async function loadAgentProviders(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.getConfig();
+		const providers = [...(resp.providers ?? [])].sort((a, b) => a.provider.localeCompare(b.provider));
+		return [
+			...STATIC_PROVIDER_OPTIONS,
+			...providers.map((p) => ({
+				name: p.provider,
+				value: p.provider,
+				description: p.active ? 'active' : 'configured, not active',
+			})),
+		];
+	} catch {
+		return STATIC_PROVIDER_OPTIONS;
 	}
 }
 
@@ -158,6 +236,32 @@ export async function loadSnapshots(this: ILoadOptionsFunctions): Promise<INodeP
 		}));
 	} catch (err) {
 		return [failedToLoadOption('snapshots', err)];
+	}
+}
+
+/**
+ * List the caller's persistent volumes via GET /v1/_volumes (RFC AH,
+ * loomcycle ≥ v1.1). Backs the Get / Delete / Purge name dropdown on the
+ * Volume node. Each option is badged with its source (static floor vs the
+ * tenant's dynamic VolumeDefs) + mode, so an operator can tell a managed
+ * dynamic volume from the read-only static floor at a glance. Delete / Purge
+ * only succeed on dynamic volumes; the substrate refuses static ones.
+ */
+export async function loadVolumes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.listVolumes();
+		const entries = [...resp.entries].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
+			return [{ name: '— no volumes; create one or type a name manually —', value: '' }];
+		}
+		return entries.map((v) => ({
+			name: v.name,
+			value: v.name,
+			description: `${v.source} · ${v.mode}${v.default ? ' · default' : ''}`,
+		}));
+	} catch (err) {
+		return [failedToLoadOption('volumes', err)];
 	}
 }
 

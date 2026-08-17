@@ -14,3 +14,5 @@ export { llmOps } from './llm';
 export { memoryBackendDefOps } from './memorybackenddef';
 export { operatorTokenDefOps } from './operatortokendef';
 export { snapshotOps } from './snapshot';
+export { volumeOps } from './volume';
+export { pathOps } from './path';

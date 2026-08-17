@@ -1,13 +1,18 @@
 import type { INodeProperties } from 'n8n-workflow';
 
 /**
- * Operation descriptions for the `run` resource of the LoomCycle umbrella
- * node. Five ops:
- *   - Spawn         → runStreaming (drained synchronously)
- *   - Get Status    → getAgent
- *   - Wait          → poll getAgent until terminal state
- *   - Cancel        → cancelAgent (cascades via parent_agent_id)
- *   - List Agents   → listUserAgents
+ * Operation descriptions for the `run` resource. Eleven ops:
+ *   - Spawn                → runStreaming (drained synchronously)
+ *   - Spawn Batch          → spawnRunBatch (up to 32 concurrent children)
+ *   - Send Input           → sendRunInput (steer a parked interactive run)
+ *   - Get Status           → getAgent
+ *   - Get Transcript       → getTranscript
+ *   - Compact              → compactRun
+ *   - Cancel               → cancelAgent (cascades via parent_agent_id)
+ *   - Cancel Turn          → cancelTurn (RFC BH — park, don't terminate)
+ *   - Replay Session       → replaySession (RFC BJ P4)
+ *   - List Agents          → listUserAgents
+ *   - List Runnable Agents → runnableAgents (RFC BY)
  *
  * Long runs block the node's execute(); operators wanting async semantics
  * should use the LoomCycle: Run Completed trigger (Sub-phase 2.3).
@@ -28,6 +33,13 @@ export const runOps: INodeProperties[] = [
 				value: 'cancel',
 				description: 'Cancel a running agent (cascades to children via parent_agent_id)',
 				action: 'Cancel a run',
+			},
+			{
+				name: 'Cancel Turn',
+				value: 'cancelTurn',
+				description:
+					'Stop the current turn of a live interactive run and park it awaiting input, keeping session + transcript intact (loomcycle ≥ v1.22)',
+				action: 'Cancel the current turn of a run',
 			},
 			{
 				name: 'Compact',
@@ -54,6 +66,26 @@ export const runOps: INodeProperties[] = [
 				action: 'List agents for a user',
 			},
 			{
+				name: 'List Runnable Agents',
+				value: 'listRunnableAgents',
+				description:
+					'List the agents this credential may run, tiered by access mode — works with a delegated per-user token (loomcycle ≥ v1.51)',
+				action: 'List runnable agents',
+			},
+			{
+				name: 'Replay Session',
+				value: 'replaySession',
+				description:
+					'Replay a session transcript into a new session bound to another agent, which continues from the same context (loomcycle ≥ v1.25)',
+				action: 'Replay a session onto another agent',
+			},
+			{
+				name: 'Send Input',
+				value: 'sendInput',
+				description: 'Push an operator turn into a live interactive run parked at end_turn (loomcycle ≥ v1.1.1)',
+				action: 'Send input to an interactive run',
+			},
+			{
 				name: 'Spawn',
 				value: 'spawn',
 				description: 'Spawn a new loomcycle agent run and wait synchronously for completion',
@@ -66,6 +98,8 @@ export const runOps: INodeProperties[] = [
 				action: 'Spawn a batch of runs',
 			},
 			{
+				// FULL EDITION ONLY — polls with setTimeout, which n8n Cloud's
+				// scanner bans. The slim edition has no Wait op.
 				name: 'Wait for Completion',
 				value: 'wait',
 				description: 'Poll until the agent reaches a terminal state (completed/failed/cancelled)',
@@ -83,9 +117,9 @@ export const runOps: INodeProperties[] = [
 		typeOptions: { loadOptionsMethod: 'loadAgents' },
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['run'], operation: ['spawn'] } },
+		displayOptions: { show: { resource: ['run'], operation: ['spawn', 'replaySession'] } },
 		description:
-			'Agent to spawn — merged from loomcycle.yaml + AgentDef registry via the GET /v1/_library/agents endpoint. Each option\'s description tag (yaml-static / dynamic / yaml+dynamic) shows where the definition lives. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			'For Spawn, the agent to run; for Replay Session, the agent the replayed context is handed to. Merged from loomcycle.yaml + AgentDef registry via the GET /v1/_library/agents endpoint, falling back to the runnable-agent listing when the credential is a delegated user token. Each option\'s description tag (yaml-static / dynamic / yaml+dynamic) shows where the definition lives. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
 	{
 		displayName: 'Prompt',
@@ -161,6 +195,32 @@ export const runOps: INodeProperties[] = [
 				default: '{}',
 				description:
 					'Per-run context-compaction override (loomcycle ≥ v0.32), e.g. `{"enabled":true,"keepLastN":4,"autocompactAtPct":80}`. Keys: enabled, targetPercentage, keepLastN, keepFirst, autocompactAtPct, model. Empty = inherit the agent\'s settings.',
+			},
+			{
+				// RFC AT (loomcycle v1.7): vision input. The node reads these
+				// binary properties off the input item and base64s them into
+				// `image` content blocks. There is deliberately no URL form on
+				// the wire (loomcycle refuses it as SSRF), so the bytes must
+				// travel inline.
+				displayName: 'Image Binary Properties (Comma-Separated)',
+				name: 'imageBinaryProperties',
+				type: 'string',
+				default: '',
+				description:
+					'Binary property names on the input item to send as images (loomcycle ≥ v1.7), e.g. `data`. Each must be PNG, JPEG, GIF or WebP. The agent\'s model must be vision-capable or the run errors before the provider call. Empty = no images.',
+			},
+			{
+				// loomcycle v1.1.1 (RFC AI): start a PERSISTENT interactive run
+				// that parks at end_turn instead of running to completion. The
+				// node returns once the run parks (awaitingInput: true, with the
+				// run_id) rather than blocking for the full run — drive it
+				// afterwards with the Send Input op or the Run Completed trigger.
+				displayName: 'Interactive Session',
+				name: 'interactive',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to start a persistent interactive run that parks at end_turn awaiting operator steering (loomcycle ≥ v1.1.1). The node returns as soon as the run parks (with its run_id and awaitingInput: true) instead of waiting for completion. Push follow-up turns with the Send Input operation, and read final output via the Run Completed trigger or Get Status.',
 			},
 			{
 				// loomcycle v0.21: non-secret structured metadata channel.
@@ -274,7 +334,7 @@ export const runOps: INodeProperties[] = [
 		description: 'The agent_id of the run to inspect / wait on / cancel',
 	},
 
-	// ---- Wait-specific ----
+	// ---- Wait-specific (FULL EDITION ONLY) ----
 	{
 		displayName: 'Poll Interval (Ms)',
 		name: 'pollIntervalMs',
@@ -300,19 +360,50 @@ export const runOps: INodeProperties[] = [
 		name: 'reason',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['run'], operation: ['cancel', 'compact'] } },
+		displayOptions: { show: { resource: ['run'], operation: ['cancel', 'cancelTurn', 'compact'] } },
 		description: 'Operator-visible reason recorded with the cancellation / compaction',
 	},
 
-	// ---- Compact: Run ID ----
+	// ---- Compact / Send Input / Cancel Turn: shared Run ID ----
 	{
 		displayName: 'Run ID',
 		name: 'runId',
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['run'], operation: ['compact'] } },
-		description: 'The run_id to compact (from a Spawn output). Summarises its conversation; reports before/after token counts + whether applied live, as a marker, or a no-op.',
+		displayOptions: { show: { resource: ['run'], operation: ['cancelTurn', 'compact', 'sendInput'] } },
+		description: 'The run_id to target (from a Spawn output). Compact summarises its conversation; Send Input delivers an operator turn to it if it is a live interactive run parked at end_turn; Cancel Turn stops its in-flight turn and parks it.',
+	},
+
+	// ---- Replay Session: source session + optional compression ----
+	{
+		displayName: 'Source Session ID',
+		name: 'sourceSessionId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['run'], operation: ['replaySession'] } },
+		description: 'The session_id whose transcript is replayed. A NEW session is created bound to the agent chosen above; the response carries its new_session_id, which you continue with via Spawn\'s Session ID field.',
+	},
+	{
+		displayName: 'Compress Carried History',
+		name: 'compress',
+		type: 'boolean',
+		default: false,
+		displayOptions: { show: { resource: ['run'], operation: ['replaySession'] } },
+		description: 'Whether to collapse the carried transcript to a summary plus a recent tail instead of replaying it in full. Use for long sessions that would otherwise consume the target agent\'s context.',
+	},
+
+	// ---- Send Input: the operator turn ----
+	{
+		displayName: 'Input Text',
+		name: 'inputText',
+		type: 'string',
+		typeOptions: { rows: 3 },
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['run'], operation: ['sendInput'] } },
+		description: 'Operator message delivered to the parked interactive run as the next user turn. The response returns `delivered: false` if no parked run accepted it (the run already finished, or steering is disabled on the substrate).',
 	},
 
 	// ---- Get Transcript: Session ID ----

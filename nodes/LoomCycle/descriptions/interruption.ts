@@ -25,6 +25,12 @@ export const interruptionOps: INodeProperties[] = [
 		displayOptions: { show: { resource: ['interruption'] } },
 		options: [
 			{
+				name: 'Decline',
+				value: 'decline',
+				description: 'Decline a pending ask without answering — the agent\'s Question tool returns "declined" and the run continues (loomcycle ≥ v1.22)',
+				action: 'Decline an interrupt',
+			},
+			{
 				name: 'List for Run',
 				value: 'listForRun',
 				description: 'List interrupts emitted by a specific run',
@@ -63,7 +69,7 @@ export const interruptionOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['interruption'], operation: ['listForRun', 'resolve'] } },
+		displayOptions: { show: { resource: ['interruption'], operation: ['listForRun', 'resolve', 'decline'] } },
 		description: 'The run_id that raised the interrupt (from a Spawn output or the Interrupt Pending trigger)',
 	},
 
@@ -90,8 +96,8 @@ export const interruptionOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['interruption'], operation: ['resolve'] } },
-		description: 'The interrupt_id to resolve (from a List op or the Interrupt Pending trigger)',
+		displayOptions: { show: { resource: ['interruption'], operation: ['resolve', 'decline'] } },
+		description: 'The interrupt_id to resolve / decline (from a List op or the Interrupt Pending trigger)',
 	},
 	{
 		displayName: 'Answer',
@@ -107,7 +113,7 @@ export const interruptionOps: INodeProperties[] = [
 		name: 'resolvedBy',
 		type: 'string',
 		default: '',
-		displayOptions: { show: { resource: ['interruption'], operation: ['resolve'] } },
-		description: 'Audit attribution for who resolved it (free-form). Empty = `client`.',
+		displayOptions: { show: { resource: ['interruption'], operation: ['resolve', 'decline'] } },
+		description: 'Audit attribution for who resolved / declined it (free-form). Empty = `client`.',
 	},
 ];
