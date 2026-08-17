@@ -11,6 +11,7 @@ import type {
 	HookPhase,
 	InterruptStatus,
 	CreateSnapshotOptions,
+	CreateUserBody,
 	DocumentToolInput,
 	LLMChatMessage,
 	LLMChatOptions,
@@ -22,8 +23,11 @@ import type {
 	RunBatchOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
+	SetTokenLimitRequest,
 	SubstrateToolInput,
 	UpdateChannelOptions,
+	UpdateUserBody,
+	UsageDimension,
 	VolumeMode,
 } from '@loomcycle/client';
 
@@ -105,6 +109,14 @@ export async function executeLoomCycle(
 				row = await executeDocumentSourceDef(ctx, client, operation, i);
 			} else if (resource === 'team') {
 				row = await executeTeam(ctx, client, operation, i);
+			} else if (resource === 'directory') {
+				row = await executeDirectory(ctx, client, operation, i);
+			} else if (resource === 'erasure') {
+				row = await executeErasure(ctx, client, operation, i);
+			} else if (resource === 'user') {
+				row = await executeUser(ctx, client, operation, i);
+			} else if (resource === 'usage') {
+				row = await executeUsage(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1818,3 +1830,244 @@ function parseJsonField(
 	}
 }
 
+
+/**
+ * Directory (loomcycle ≥ v1.46) — read-only "who is in this deployment".
+ *
+ * A "user" here is DERIVED from run activity rather than stored, which is why
+ * there is nothing to create or update; removing a footprint is the Erasure
+ * resource. `tenant` is threaded as an EXPLICIT EMPTY STRING when the operator
+ * typed one, because for an admin token `""` selects the default tenant while
+ * omitting the field entirely makes the server refuse rather than guess.
+ */
+async function executeDirectory(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'tenants') {
+		// Admin-only: a tenant-scoped token is refused outright rather than given
+		// a filtered list, and the substrate's message says so — so it passes
+		// through wrapLoomcycleError unaltered.
+		const resp = await client.directoryTenants();
+		return resp as unknown as IDataObject;
+	}
+
+	const tenantRaw = ctx.getNodeParameter('tenant', i, undefined) as string | undefined;
+	const opts = tenantRaw === undefined ? undefined : { tenant: tenantRaw };
+
+	if (operation === 'users') {
+		const resp = await client.directoryUsers(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'inspect') {
+		const subject = ctx.getNodeParameter('subject', i) as string;
+		const resp = await client.directoryInspect(subject, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown directory operation: ${operation}`);
+}
+
+/**
+ * Subject erasure (RFC BL P5, loomcycle ≥ v1.45).
+ *
+ * Two safety properties are deliberate here. `dryRun` is sent EXPLICITLY rather
+ * than relying on the server default, so a reader of this code can see which
+ * mode the request is in. And the confirm string is checked LOCALLY first: the
+ * substrate requires `confirm === subject`, and failing here means a typo cannot
+ * reach a destructive endpoint at all.
+ *
+ * The response — dry run or not — is returned verbatim because it is the only
+ * durable record of tier-3 residue.
+ */
+async function executeErasure(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const subject = ctx.getNodeParameter('subject', i) as string;
+	const tenantRaw = ctx.getNodeParameter('tenant', i, undefined) as string | undefined;
+
+	if (operation === 'report') {
+		const resp = await client.erasureReport(
+			subject,
+			tenantRaw === undefined ? undefined : { tenant: tenantRaw },
+		);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'execute') {
+		const commit = ctx.getNodeParameter('commit', i, false) as boolean;
+		const opts: { dryRun: boolean; confirm?: string; tenant?: string } = { dryRun: !commit };
+		if (tenantRaw !== undefined) opts.tenant = tenantRaw;
+
+		if (commit) {
+			const confirmSubject = (ctx.getNodeParameter('confirmSubject', i, '') as string).trim();
+			if (confirmSubject !== subject) {
+				throw new NodeOperationError(
+					ctx.getNode(),
+					`Confirm Subject must exactly match Subject to run a live erasure. Got "${confirmSubject}" for subject "${subject}". Nothing was sent.`,
+					{ itemIndex: i },
+				);
+			}
+			opts.confirm = confirmSubject;
+		}
+
+		const resp = await client.erasureExecute(subject, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown erasure operation: ${operation}`);
+}
+
+/**
+ * Tenant-owned users + delegated tokens (RFC BX P2, loomcycle ≥ v1.50).
+ *
+ * The tenant is always server-derived, so no call here takes one.
+ *
+ * `mintUserToken` is deliberately unreachable: the substrate returns the bearer
+ * plaintext exactly once, and surfacing it would persist a live credential into
+ * n8n execution data (CLAUDE.md §security.6). It is absent from the op list AND
+ * refused here, the same defence-in-depth the Operator Token node uses.
+ */
+async function executeUser(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'mint' || operation === 'mintToken' || operation === 'rotate') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Minting a delegated token is not available from n8n: the substrate returns the bearer plaintext once, and it would be persisted into execution data. Mint it via the loomcycle CLI or Web UI.',
+			{ itemIndex: i },
+		);
+	}
+
+	if (operation === 'list') {
+		const resp = await client.listUsers();
+		return resp as unknown as IDataObject;
+	}
+
+	const subject = ctx.getNodeParameter('subject', i) as string;
+
+	if (operation === 'create') {
+		const body: CreateUserBody = { subject };
+		const displayName = (ctx.getNodeParameter('displayName', i, '') as string).trim();
+		if (displayName) body.display_name = displayName;
+		body.access_mode = ctx.getNodeParameter('accessMode', i, 'tenant') as string;
+		body.status = ctx.getNodeParameter('status', i, 'active') as string;
+		const resp = await client.createUser(body);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'update') {
+		// A PATCH: an omitted key leaves the column unchanged, so a blank display
+		// name must not be sent as "" — that would clear it.
+		const body: UpdateUserBody = {};
+		const displayName = (ctx.getNodeParameter('displayName', i, '') as string).trim();
+		if (displayName) body.display_name = displayName;
+		const accessMode = ctx.getNodeParameter('accessMode', i, '') as string;
+		if (accessMode) body.access_mode = accessMode;
+		const status = ctx.getNodeParameter('status', i, '') as string;
+		if (status) body.status = status;
+		const resp = await client.updateUser(subject, body);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'delete') {
+		await client.deleteUser(subject);
+		// 204 on the wire; surface a consistent envelope for n8n. Worth stating
+		// that data survives — this deletes an identity, not a footprint.
+		return {
+			ok: true,
+			subject,
+			note: 'Identity row deleted and its delegated tokens retired. Owned data (runs, sessions, memory) is untouched — use the Erasure node for that.',
+		} as IDataObject;
+	}
+
+	if (operation === 'listTokens') {
+		const resp = await client.listUserTokens(subject);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'revokeToken') {
+		const defId = ctx.getNodeParameter('tokenDefId', i) as string;
+		const resp = await client.revokeUserToken(subject, defId);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown user operation: ${operation}`);
+}
+
+/**
+ * Usage attribution (RFC AV) + token budgets (RFC AW) + the instance capability
+ * report. The FinOps surface.
+ */
+async function executeUsage(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'getConfig') {
+		const resp = await client.getConfig();
+		return resp as unknown as IDataObject;
+	}
+
+	const tenant = (ctx.getNodeParameter('tenant', i, '') as string).trim();
+
+	if (operation === 'usageReport') {
+		const opts: { groupBy?: UsageDimension[]; from?: string; to?: string; tenant?: string } = {};
+		const groupBy = ctx.getNodeParameter('groupBy', i, []) as string[];
+		if (groupBy.length > 0) opts.groupBy = groupBy as UsageDimension[];
+		// The wire wants RFC3339; n8n's dateTime already emits it.
+		const from = (ctx.getNodeParameter('from', i, '') as string).trim();
+		if (from) opts.from = from;
+		const to = (ctx.getNodeParameter('to', i, '') as string).trim();
+		if (to) opts.to = to;
+		if (tenant) opts.tenant = tenant;
+		const resp = await client.usageReport(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listLimits') {
+		const resp = await client.listLimits(tenant ? { tenant } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'setLimit') {
+		// FULL-ROW UPSERT: an omitted tier is CLEARED to unlimited, not left
+		// alone. 0 in the UI therefore means "unlimited on this axis", which is
+		// why it is omitted from the body rather than sent as 0.
+		const body: SetTokenLimitRequest = {
+			scope: ctx.getNodeParameter('limitScope', i, 'tenant') as string,
+		};
+		const scopeId = (ctx.getNodeParameter('limitScopeId', i, '') as string).trim();
+		if (scopeId) body.scope_id = scopeId;
+		const softLimit = ctx.getNodeParameter('softLimit', i, 0) as number;
+		if (softLimit > 0) body.soft_limit = softLimit;
+		const hardLimit = ctx.getNodeParameter('hardLimit', i, 0) as number;
+		if (hardLimit > 0) body.hard_limit = hardLimit;
+		if (tenant) body.tenant_id = tenant;
+		const resp = await client.setLimit(body);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'deleteLimit') {
+		const scope = ctx.getNodeParameter('limitScope', i, 'tenant') as string;
+		const scopeId = (ctx.getNodeParameter('limitScopeId', i, '') as string).trim();
+		const opts: { scopeId?: string; tenant?: string } = {};
+		if (scopeId) opts.scopeId = scopeId;
+		if (tenant) opts.tenant = tenant;
+		await client.deleteLimit(scope, Object.keys(opts).length > 0 ? opts : undefined);
+		// void on the wire; surface a consistent envelope.
+		return { ok: true, scope, scope_id: scopeId || undefined } as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown usage operation: ${operation}`);
+}

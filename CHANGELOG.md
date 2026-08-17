@@ -2,6 +2,38 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.0] — 2026-08-17
+
+**Minor release.** The governance and multi-tenancy surface — who is in the deployment, what is held about them, who may act, and what it costs. Phase 4 of the v1.55 catch-up. **26 → 30 nodes.**
+
+### Added
+
+- **LoomCycle Directory node** (3 ops, loomcycle ≥ v1.46) — `List Users` / `Inspect Subject` / `List Tenants`. Read-only by design: a user here is **derived from run activity**, not a stored record, so there is nothing to write.
+- **LoomCycle Erasure node** (2 ops, RFC BL P5, ≥ v1.45) — `Report` (read-only, three tiers) and `Execute` (removes tiers 1 and 2). The natural home for a GDPR data-subject-request workflow.
+- **LoomCycle User node** (6 ops, RFC BX P2, ≥ v1.50) — `List` / `Create` / `Update` / `Delete` / `List Tokens` / `Revoke Token`.
+- **LoomCycle Usage node** (5 ops, RFC AV / AW, ≥ v1.10 / v1.11) — `Usage Report` / `List Limits` / `Set Limit` / `Delete Limit` / `Get Config`.
+
+### Verified against a live loomcycle v1.55 before implementing
+
+- **`directory` op=tenants refuses a tenant-scoped token outright** rather than returning a filtered list — the substrate's own message explains why, so it passes through unaltered.
+- **`erasure` op=report is not audit-gated**, and a dry-run `execute` is accepted and deletes nothing, echoing `dry_run: true` plus a `deleted` map of what *would* go.
+- The live execute response confirmed its own shape: `retained.usage_ledger` is a prose explanation rather than a count, and `notes` literally states **"THIS RESPONSE IS THE ONLY DURABLE RECORD OF WHAT WAS NOT REACHED"**.
+- `inspect` returned `documents: 1` on this SQL-Memory-enabled instance, confirming that an *absent* `documents` key means the plane was not examined rather than empty.
+
+### Notable design decisions
+
+- **Erasure's confirmation is checked locally, before any wire call.** The substrate requires `confirm === subject`; validating first means a typo cannot reach a destructive endpoint at all. `dryRun` is also sent **explicitly** rather than relying on the server default, so a reader of the payload can see which mode the request is in.
+- **The Erasure response is returned verbatim, dry run or not** — it is the only durable record of tier-3 residue. A test asserts the whole object survives rather than being summarised.
+- **Minting a delegated token is absent from the User node**, exactly as on Operator Token: the substrate returns the bearer plaintext once, and surfacing it would persist a live credential into n8n execution data. Enforced at the op list **and** re-refused in the executor, with tests locking both.
+- **`Set Limit` omits a tier left at 0 rather than sending a zero ceiling.** It is a full-row upsert, so an omitted tier means *unlimited* — while a literal `0` would be a zero ceiling that refuses every run. Same trap as `revision: 0`, opposite resolution to `position: 0`.
+- **`User → Update` omits a blank display name** instead of clearing it, because the endpoint is a PATCH where an omitted key leaves the column unchanged.
+- **An explicitly empty `tenant` is threaded through, not dropped.** For an admin token `""` selects the default tenant whereas omitting the field makes the server refuse rather than guess — so the two cases must stay distinguishable.
+- **`Delete` on a user says what it does *not* do.** Its envelope states that owned data survives and points at the Erasure node, because "delete user" reads like erasure and is not.
+
+### Requires
+
+Erasure needs `LOOMCYCLE_AUDIT_LOG_PATH` set on the deployment (loomcycle ≥ v1.55) or it is disabled entirely. The User node needs a persistent store (503 otherwise). Budget **writes** stay operator-only even for a tenant member (the RFC CB carve-out).
+
 ## [3.14.0] — 2026-08-17
 
 **Minor release.** Agent Teams (RFC AP) — the closest analogue loomcycle has to an n8n workflow, now designable and runnable from the canvas. Phase 3 of the v1.55 catch-up. **25 → 26 nodes.**
