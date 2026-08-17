@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Twenty-two nodes (18 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Twenty-five nodes (21 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -89,6 +89,9 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
 - **LoomCycle Volume** — `Create` / `Get` / `List` / `List Ephemeral` / `Delete` / `Purge` — filesystem Volumes (RFC AH; requires loomcycle ≥ v1.1). Provision named ro/rw filesystem roots for agents (the runtime derives the on-disk path); since v1.1 a Volume is the only way an agent gets filesystem access. `Delete` unmaps but keeps the files; `Purge` removes the tree.
 - **LoomCycle Path** — `Resolve` / `List` / `Stat` / `Make Directory` / `Move` / `Remove` — the Path VFS (RFC AL; requires loomcycle ≥ v1.4): a Unix-like filesystem naming Memory entries / Volume mounts / Documents by human-readable path (e.g. `/docs/launch`). Scope (agent / user / tenant) resolves server-side from the bearer.
+- **LoomCycle Document** — 36 ops over the chunked-graph Document store (RFC AK + BS / BO / CE; requires loomcycle ≥ v1.4 **and SQL Memory** on the sidecar). Document + chunk lifecycle, edges and discovery (`Backlinks` / `Related` / `Unlinked Mentions`), tags, types, `Query Chunks` (structured filters, `Under Path`, or a validator-gated read-only SQL escape hatch), per-chunk `History` / `Get Version` / `Diff Revisions`, Markdown and **JSON Canvas** import-export, image assets, and peer federation (`Set Remote` / `Sync` / `Diff Remote`). A chunk body is embedded on write, which is what makes **Memory → Search** find it.
+- **LoomCycle Fact** — 10 ops over the RFC CC verified-writes tier (loomcycle ≥ v1.54): `Remember` / `Upsert Fact` / `Supersede Fact` / `List Facts` / `Judge Fact` / `Verbatim Answer` / `Verification Stats` / `Graph Recall` / `Propose Entity` / `Search`. A fact stores the exact **source span** it was drawn from and a write-time judge checks the claim against it; a fact that fails is **withheld, not deleted** (pass *Include Refuted* to audit it). `judged_at` / `judged_by` are server-stamped with no wire field, so a caller cannot record a machine verdict as an operator one. Corrections go through `Supersede Fact` — `Remember` is additive only, there is no forget.
+- **LoomCycle Document Source** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register a peer loomcycle instance as a document source (RFC CE; requires loomcycle ≥ v1.54), which the Document node's `Set Remote` / `Sync` ops consume. Operator-admin only; the overlay carries `api_key_env`, the env-var **name** of the peer bearer, never a plaintext token.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -237,6 +240,11 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Embedding maintenance | **v1.46** | Memory → Backfill / Purge Stale Embeddings |
 | **Unified memory search** (RFC BV/BW) | **v1.47** | Memory → Search / Embed Stats / Reembed |
 | Runnable-agent discovery (RFC BY) | **v1.51** | Run → List Runnable Agents; agent dropdown fallback |
+| **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
+| Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |
+| Document image assets (RFC BO) | **v1.30** | Document → Set Asset / Get Asset |
+| **Verified writes / fact tier** (RFC CC) | **v1.54** | Fact node — source spans, verdicts, Verbatim Answer |
+| **Remote document sources** (RFC CE) | **v1.54** | Document Source node; Document → Set Remote / Sync / Diff Remote |
 | Memory Backend (RFC I) | **v0.15** | Memory Backend action node |
 | Interruption (human-in-the-loop) | **v0.8.16** | Interruption node + Interrupt Pending trigger; resolve needs the consumer-MCP backend |
 | Snapshot backup / restore | **v0.8.17** | Snapshot action node |
