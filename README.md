@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Twenty-five nodes (21 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Twenty-six nodes (22 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -92,6 +92,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Document** — 36 ops over the chunked-graph Document store (RFC AK + BS / BO / CE; requires loomcycle ≥ v1.4 **and SQL Memory** on the sidecar). Document + chunk lifecycle, edges and discovery (`Backlinks` / `Related` / `Unlinked Mentions`), tags, types, `Query Chunks` (structured filters, `Under Path`, or a validator-gated read-only SQL escape hatch), per-chunk `History` / `Get Version` / `Diff Revisions`, Markdown and **JSON Canvas** import-export, image assets, and peer federation (`Set Remote` / `Sync` / `Diff Remote`). A chunk body is embedded on write, which is what makes **Memory → Search** find it.
 - **LoomCycle Fact** — 10 ops over the RFC CC verified-writes tier (loomcycle ≥ v1.54): `Remember` / `Upsert Fact` / `Supersede Fact` / `List Facts` / `Judge Fact` / `Verbatim Answer` / `Verification Stats` / `Graph Recall` / `Propose Entity` / `Search`. A fact stores the exact **source span** it was drawn from and a write-time judge checks the claim against it; a fact that fails is **withheld, not deleted** (pass *Include Refuted* to audit it). `judged_at` / `judged_by` are server-stamped with no wire field, so a caller cannot record a machine verdict as an operator one. Corrections go through `Supersede Fact` — `Remember` is additive only, there is no forget.
 - **LoomCycle Document Source** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register a peer loomcycle instance as a document source (RFC CE; requires loomcycle ≥ v1.54), which the Document node's `Set Remote` / `Sync` ops consume. Operator-admin only; the overlay carries `api_key_env`, the env-var **name** of the peer bearer, never a plaintext token.
+- **LoomCycle Team** — `List` / `Get` / `Create` / `Fork` / `Delete` / `Run` / `Render Diagram` — **Agent Teams** (RFC AP; requires loomcycle ≥ v1.17.1). A TeamDef is a versioned **state-machine graph** of agent roles: states carry a handler (`agent` / `parallel` / `consolidator` / `terminal`) and transitions are gated on each state's outcome. `Run` walks the graph, spawning an agent per state until a terminal — and bound to a **Document chunk task board** it persists `chunk.status` per transition, so progress is durable and a later Run **resumes** rather than restarting. `Render Diagram` emits Mermaid `stateDiagram-v2`, optionally highlighting the state a walk has reached. This is the closest analogue loomcycle has to an n8n workflow: n8n designs and triggers it, the substrate runs it under its own admission control.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -239,6 +240,7 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Live provider cascade (`GET /v1/config`) | **v1.38** | Agent Definition Provider dropdown |
 | Embedding maintenance | **v1.46** | Memory → Backfill / Purge Stale Embeddings |
 | **Unified memory search** (RFC BV/BW) | **v1.47** | Memory → Search / Embed Stats / Reembed |
+| **Agent Teams** (RFC AP) — Team node | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
 | Runnable-agent discovery (RFC BY) | **v1.51** | Run → List Runnable Agents; agent dropdown fallback |
 | **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
 | Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |
@@ -268,6 +270,15 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 ### `@loomcycle/client` (bundled, not a runtime dependency)
 
 `@loomcycle/client` (`^1.55.0`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
+
+### Known upstream gaps
+
+Some substrate operations have no `@loomcycle/client` method yet, so no node can expose them — this package never hand-rolls a wire call (see [CLAUDE.md](CLAUDE.md) "Adapter conformance"). The ones you are most likely to notice:
+
+- **Team `promote` / `retire` / `verify`.** The adapter wraps 7 of the substrate's 10 TeamDef ops. The practical consequence, verified against a live v1.55: **a Fork lands unpromoted**, so name-addressed operations (`Run` by name, `Render Diagram`) keep resolving to the previously active version. Reach a fork by the `def_id` it returns — `Run` accepts one — or promote it via the loomcycle CLI / Web UI / MCP.
+- **Team `render_diagram` overlay preview and `format`.** The substrate can syntax-check an *unsaved* graph and render it without persisting, and emit d2 as well as Mermaid; the adapter's wrapper takes neither.
+- **Team `run` `interrupt_on_cap`.** The substrate can ask a human what to do when a state hits its iteration cap; the adapter's `runTeam` does not expose it.
+- **`credentialDef` and `evaluation`** exist as MCP meta-tools with no adapter method at all.
 
 ### Verified deployments
 

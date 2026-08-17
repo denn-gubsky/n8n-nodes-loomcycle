@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+  <title>LoomCycle Team</title>
+  <rect x="2.75" y="2.75" width="54.5" height="54.5" rx="12" fill="#FAF8F3" stroke="#56C596" stroke-width="1.5"/>
+  <g fill="none" stroke="#56C596" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="24" y="13" width="13" height="9" rx="2.5"/>
+    <rect x="13" y="36" width="13" height="9" rx="2.5"/>
+    <rect x="35" y="36" width="13" height="9" rx="2.5"/>
+    <path d="M30.5 22 V29 H19.5 V36"/>
+    <path d="M30.5 29 H41.5 V36"/>
+  </g>
+</svg>

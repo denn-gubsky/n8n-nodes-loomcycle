@@ -103,6 +103,8 @@ export async function executeLoomCycle(
 				row = await executeFact(ctx, client, operation, i);
 			} else if (resource === 'documentSourceDef') {
 				row = await executeDocumentSourceDef(ctx, client, operation, i);
+			} else if (resource === 'team') {
+				row = await executeTeam(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1409,6 +1411,104 @@ async function executeDocumentSourceDef(
 	const input = buildSubstrateInput(ctx, operation, i);
 	const resp = await client.documentSourceDef(input);
 	return { result: resp } as IDataObject;
+}
+
+/**
+ * Agent Teams (RFC AP). Unlike the other Def families the adapter exposes SEVEN
+ * TYPED methods here rather than one op-discriminated call, so this does not go
+ * through `buildSubstrateInput`.
+ *
+ * The substrate's `promote` / `retire` / `verify` ops have no adapter wrapper, so
+ * they are deliberately absent rather than hand-rolled (CLAUDE.md: the adapter is
+ * the only wire-egress point). The practical consequence — verified live — is
+ * that a fork lands unpromoted and stays unreachable by name; Run by def_id is
+ * the way to reach it from here.
+ */
+async function executeTeam(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'list') {
+		const resp = await client.listTeams();
+		// `names` is a Go nil-slice on the wire: null, not [], when empty.
+		// Normalising here spares every downstream expression a null check.
+		return { names: resp.names ?? [] } as unknown as IDataObject;
+	}
+
+	if (operation === 'get') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		const resp = await client.getTeamDef(defId);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'create' || operation === 'fork') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		// Strict: an invalid graph is refused server-side anyway, but a JSON typo
+		// should name itself here rather than arriving as a validation error about
+		// a graph the operator never meant to send.
+		const overlay = parseJsonField(ctx.getNodeParameter('overlay', i, '{}') as unknown, {
+			strict: true,
+			node: ctx.getNode(),
+		}) as Record<string, unknown>;
+		const description = (ctx.getNodeParameter('defDescription', i, '') as string).trim();
+		if (description) overlay.description = description;
+
+		const resp =
+			operation === 'create'
+				? await client.createTeam(name, overlay)
+				: await client.forkTeam(name, overlay);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'delete') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const resp = await client.deleteTeam(name);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'renderDiagram') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const highlightState = (ctx.getNodeParameter('highlightState', i, '') as string).trim();
+		const resp = await client.renderTeamDiagram(
+			name,
+			highlightState ? { highlightState } : undefined,
+		);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'run') {
+		const targetBy = ctx.getNodeParameter('runTargetBy', i, 'name') as string;
+		const input = (ctx.getNodeParameter('input', i, '') as string).trim();
+		const boardOptions = ctx.getNodeParameter('boardOptions', i, {}) as IDataObject;
+
+		const target: {
+			name?: string;
+			defId?: string;
+			input?: string;
+			boardChunkId?: string;
+			boardScope?: 'agent' | 'user';
+		} = {};
+		if (targetBy === 'defId') {
+			target.defId = ctx.getNodeParameter('runDefId', i) as string;
+		} else {
+			target.name = ctx.getNodeParameter('runTeamName', i) as string;
+		}
+		if (input) target.input = input;
+		if (boardOptions.boardChunkId) {
+			target.boardChunkId = boardOptions.boardChunkId as string;
+			// Only meaningful alongside a board chunk, so it is not sent alone.
+			if (boardOptions.boardScope) {
+				target.boardScope = boardOptions.boardScope as 'agent' | 'user';
+			}
+		}
+
+		const resp = await client.runTeam(target);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown team operation: ${operation}`);
 }
 
 /**
