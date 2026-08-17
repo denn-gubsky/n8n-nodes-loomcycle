@@ -120,11 +120,11 @@ export const factOps: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				resource: ['fact'],
-				operation: ['upsert_chunk', 'list_facts', 'remember', 'propose_entity'],
+				operation: ['upsert_chunk', 'remember', 'propose_entity'],
 			},
 		},
 		description:
-			'The entity this fact is ABOUT. A fact carries a subject + type; a plain document chunk carries neither — that is how the ontology gate distinguishes them.',
+			'The entity this fact is ABOUT. A fact carries a subject + type; a plain document chunk carries neither — that is how the ontology gate distinguishes them. Note List Facts filters by TYPE, not by subject.',
 	},
 	{
 		displayName: 'Entity Type',
@@ -138,7 +138,7 @@ export const factOps: INodeProperties[] = [
 			},
 		},
 		description:
-			'The entity type, e.g. `person` / `project`. Retrieval expands confirmed subtypes downward, so querying a parent type also returns its children. `preference` and `fact` are pinned as ontology roots and refused as entity types — they would become a magnet node every fact attached to.',
+			'The entity type, e.g. `person` / `project`. On List Facts this is the filter — and it INCLUDES SUBTYPES, so asking for a broad type also returns the more specific kinds of it (the response reports `type_expanded_to` when that widened the filter). `preference` and `fact` are pinned as ontology roots and refused as entity types — they would become a magnet node every fact attached to.',
 	},
 
 	// ---- Upsert / supersede: the claim + its evidence ----
@@ -268,6 +268,72 @@ export const factOps: INodeProperties[] = [
 			'A statement a person supplied. It is stored as a fact that CITES ITSELF — the text is both the claim and its own source span, filed as evidential. Additive only: there is no forget, so corrections go through Supersede Fact.',
 	},
 
+	{
+		displayName: 'Class Filter',
+		name: 'classFilter',
+		type: 'options',
+		default: '',
+		displayOptions: { show: { resource: ['fact'], operation: ['list_facts'] } },
+		options: [
+			{ name: 'Any', value: '' },
+			{ name: 'Derived (Distilled From Something Else)', value: 'derived' },
+			{ name: 'Evidential (Source Material)', value: 'evidential' },
+		],
+		description: 'Return only facts of this class. Any = no filter.',
+	},
+
+	// ---- Bi-temporal write fields (RFC CC / the v1.42 entity tier) ----
+	// The fact tier is bi-temporal: WHEN A FACT WAS TRUE IN THE WORLD is tracked
+	// separately from when it was recorded. Both are unix nanoseconds on the
+	// wire; exposed here as n8n dateTime and converted, because hand-authoring
+	// nanos in a workflow is a needless footgun.
+	{
+		displayName: 'Fact Options',
+		name: 'factOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk', 'remember'] } },
+		options: [
+			{
+				displayName: 'Class',
+				name: 'class',
+				type: 'options',
+				default: 'derived',
+				options: [
+					{ name: 'Derived (Distilled From Something Else)', value: 'derived' },
+					{ name: 'Evidential (Source Material)', value: 'evidential' },
+				],
+				description:
+					'What kind of record this is. `derived` (the default) was distilled from a source; `evidential` IS the source material and is exempt from age-based pruning. Remember files evidential automatically, because the statement is its own evidence.',
+			},
+			{
+				displayName: 'Confidence',
+				name: 'confidence',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0, maxValue: 1, numberPrecision: 2 },
+				description: 'How sure you are of this fact, 0 to 1. Leave at 0 to omit — distinct from asserting zero confidence.',
+			},
+			{
+				displayName: 'Valid At',
+				name: 'validAt',
+				type: 'dateTime',
+				default: '',
+				description:
+					'When the fact became true IN THE WORLD — deliberately distinct from when it was recorded. Defaults to now. Set it to backdate a fact you learned late, so an As Of query for that period returns it.',
+			},
+			{
+				displayName: 'Invalid At',
+				name: 'invalidAt',
+				type: 'dateTime',
+				default: '',
+				description:
+					'When the fact STOPPED being true. Leave empty for something still true. Note a known future end-date does not delete the fact — it stays queryable for questions about the period it held.',
+			},
+		],
+	},
+
 	// ---- Query / recall ----
 	{
 		displayName: 'Query',
@@ -275,8 +341,18 @@ export const factOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['fact'], operation: ['graph_recall', 'verbatim_answer', 'search'] } },
-		description: 'On Graph Recall this finds the starting chunks by title; on Verbatim Answer it is the lookup question; on Search it is matched against chunk bodies semantically',
+		displayOptions: { show: { resource: ['fact'], operation: ['verbatim_answer', 'search'] } },
+		description: 'On Verbatim Answer this is the lookup question; on Search it is matched semantically against chunk bodies',
+	},
+	{
+		// Not required here, unlike the other two ops: Graph Options → Seed Chunk
+		// IDs is the alternative entry point into the graph.
+		displayName: 'Query',
+		name: 'query',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['fact'], operation: ['graph_recall'] } },
+		description: 'Finds the starting chunks by title. Leave empty when supplying Seed Chunk IDs under Graph Options instead.',
 	},
 	{
 		displayName: 'Include Refuted',
@@ -286,6 +362,62 @@ export const factOps: INodeProperties[] = [
 		displayOptions: { show: { resource: ['fact'], operation: ['list_facts', 'graph_recall'] } },
 		description:
 			'Whether to also return facts a judge marked unsupported. They are retained but withheld by default — turn this on to audit what failed verification rather than to consume it as truth.',
+	},
+	{
+		displayName: 'Recall Options',
+		name: 'recallOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['fact'], operation: ['list_facts', 'graph_recall'] } },
+		options: [
+			{
+				displayName: 'As Of',
+				name: 'asOf',
+				type: 'dateTime',
+				default: '',
+				description:
+					'Answer as of this instant instead of now — the point of a bi-temporal store. Returns what was true then, INCLUDING facts that have since been corrected, so a report can be reproduced exactly as it read at the time.',
+			},
+			{
+				displayName: 'Include Retired',
+				name: 'includeRetired',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to also return facts that have been superseded. Off by default, so you get only what is currently true. Distinct from Include Refuted, which returns facts a judge rejected — retired means replaced, refuted means unsupported.',
+			},
+		],
+	},
+	{
+		displayName: 'Graph Options',
+		name: 'graphOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['fact'], operation: ['graph_recall'] } },
+		options: [
+			{
+				displayName: 'Hops',
+				name: 'hops',
+				type: 'options',
+				default: 1,
+				options: [
+					{ name: '0 — Starting Chunks Only', value: 0 },
+					{ name: '1 — Their Neighbours (Default)', value: 1 },
+					{ name: '2 — Maximum', value: 2 },
+				],
+				description: 'How far to follow relations out from each starting chunk. The substrate caps this at 2.',
+			},
+			{
+				displayName: 'Seed Chunk IDs (Comma-Separated)',
+				name: 'seedIds',
+				type: 'string',
+				default: '',
+				description:
+					'Start from these chunks instead of matching by title — hand in IDs you already found some other way (a Memory Search, an earlier recall) and follow the graph out from them. Supplying seeds makes the Query field unnecessary.',
+			},
+		],
 	},
 	{
 		displayName: 'Min Score',

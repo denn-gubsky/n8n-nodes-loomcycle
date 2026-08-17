@@ -57,18 +57,30 @@ describe('LoomCycle resource=fact', () => {
 		});
 	});
 
-	it('List Facts omits include_refuted by default so withheld facts stay withheld', async () => {
+	// Verified live: List Facts filters on type (with subtype expansion) and
+	// class; `subject` is accepted but silently IGNORED, so the node does not
+	// offer it here and must not send it.
+	it('List Facts filters by type and class, never by subject', async () => {
 		mockClient.document.mockResolvedValue({ facts: [] });
 		const node = new LoomCycleFact();
 		const ctx = makeExecuteContext({
-			params: { resource: 'fact', operation: 'list_facts', scope: 'user', subject: 'alice' },
+			params: {
+				resource: 'fact',
+				operation: 'list_facts',
+				scope: 'user',
+				type: 'project',
+				classFilter: 'evidential',
+			},
 		});
 		await node.execute.call(ctx);
 		expect(mockClient.document).toHaveBeenCalledWith({
 			op: 'list_facts',
 			scope: 'user',
-			subject: 'alice',
+			type: 'project',
+			class: 'evidential',
 		});
+		// include_refuted omitted by default, so withheld facts stay withheld.
+		expect(mockClient.document.mock.calls[0][0]).not.toHaveProperty('include_refuted');
 	});
 
 	it('List Facts forwards include_refuted when auditing failures', async () => {
@@ -79,7 +91,6 @@ describe('LoomCycle resource=fact', () => {
 				resource: 'fact',
 				operation: 'list_facts',
 				scope: 'user',
-				subject: 'alice',
 				includeRefuted: true,
 			},
 		});
@@ -211,6 +222,107 @@ describe('LoomCycle resource=fact', () => {
 		const arg = mockClient.document.mock.calls[0][0];
 		expect(arg.query).toBe('what timezone is alice in');
 		expect(arg).not.toHaveProperty('min_score');
+	});
+
+	// The bi-temporal surface: the substrate takes unix NANOSECONDS, the node
+	// takes an n8n dateTime. ms -> ns is exact (x1e6), verified live against
+	// valid_at / as_of on a real v1.55.
+	describe('Bi-temporal fields', () => {
+		it('Upsert Fact converts dateTime options to unix nanoseconds', async () => {
+			mockClient.document.mockResolvedValue({ created: true });
+			const node = new LoomCycleFact();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'fact',
+					operation: 'upsert_chunk',
+					scope: 'user',
+					documentId: 'd1',
+					subject: 'acme',
+					type: 'project',
+					body: 'Acme was in pilot phase.',
+					factOptions: {
+						validAt: '2026-01-01T00:00:00.000Z',
+						class: 'evidential',
+						confidence: 0.9,
+					},
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.document.mock.calls[0][0];
+			expect(arg.valid_at).toBe(1767225600000 * 1_000_000);
+			expect(arg.class).toBe('evidential');
+			expect(arg.confidence).toBe(0.9);
+			// invalid_at unset means "still true" — sharply different from the epoch.
+			expect(arg).not.toHaveProperty('invalid_at');
+		});
+
+		it('Upsert Fact omits confidence at zero rather than asserting no confidence', async () => {
+			mockClient.document.mockResolvedValue({});
+			const node = new LoomCycleFact();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'fact',
+					operation: 'upsert_chunk',
+					scope: 'user',
+					documentId: 'd1',
+					body: 'x',
+					factOptions: { confidence: 0 },
+				},
+			});
+			await node.execute.call(ctx);
+			expect(mockClient.document.mock.calls[0][0]).not.toHaveProperty('confidence');
+		});
+
+		it('Upsert Fact rejects an unparseable date instead of sending NaN', async () => {
+			const node = new LoomCycleFact();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'fact',
+					operation: 'upsert_chunk',
+					scope: 'user',
+					documentId: 'd1',
+					body: 'x',
+					factOptions: { validAt: 'not-a-date' },
+				},
+			});
+			await expect(node.execute.call(ctx)).rejects.toBeInstanceOf(NodeOperationError);
+			expect(mockClient.document).not.toHaveBeenCalled();
+		});
+
+		it('List Facts converts As Of and forwards Include Retired', async () => {
+			mockClient.document.mockResolvedValue({ facts: [] });
+			const node = new LoomCycleFact();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'fact',
+					operation: 'list_facts',
+					scope: 'user',
+					recallOptions: { asOf: '2025-06-01T00:00:00.000Z', includeRetired: true },
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.document.mock.calls[0][0];
+			expect(arg.as_of).toBe(1748736000000 * 1_000_000);
+			expect(arg.include_retired).toBe(true);
+		});
+
+		// hops 0 is meaningful (starting chunks only), unlike confidence 0.
+		it('Graph Recall sends hops zero and parses seed IDs', async () => {
+			mockClient.document.mockResolvedValue({ facts: [] });
+			const node = new LoomCycleFact();
+			const ctx = makeExecuteContext({
+				params: {
+					resource: 'fact',
+					operation: 'graph_recall',
+					scope: 'user',
+					graphOptions: { hops: 0, seedIds: 'c1, c2 , c3' },
+				},
+			});
+			await node.execute.call(ctx);
+			const arg = mockClient.document.mock.calls[0][0];
+			expect(arg.hops).toBe(0);
+			expect(arg.seed_ids).toEqual(['c1', 'c2', 'c3']);
+		});
 	});
 
 	it('Verification Stats needs nothing but a scope', async () => {

@@ -348,6 +348,15 @@ export const documentOps: INodeProperties[] = [
 		description: 'Chunk to nest under. Omit on Create Chunk to attach to the document root.',
 	},
 	{
+		displayName: 'After Sibling Chunk ID',
+		name: 'afterId',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['document'], operation: ['create_chunk'] } },
+		description:
+			'Insert the new chunk immediately after this sibling, shifting later ones down. Overrides Parent Chunk ID, since the parent is implied by the sibling. Empty = append under the parent.',
+	},
+	{
 		displayName: 'New Parent Chunk ID',
 		name: 'newParentId',
 		type: 'string',
@@ -508,8 +517,18 @@ export const documentOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		placeholder: '/docs',
-		displayOptions: { show: { resource: ['document'], operation: ['query_chunks'] } },
-		description: 'Restrict to chunks of documents at or under this Path-tree path',
+		displayOptions: {
+			show: { resource: ['document'], operation: ['query_chunks', 'query_documents', 'documents_summary'] },
+		},
+		description: 'Restrict to documents at or under this Path-tree path (and, for Query Chunks, to their chunks)',
+	},
+	{
+		displayName: 'Document IDs (Comma-Separated)',
+		name: 'documentIds',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['document'], operation: ['documents_summary'] } },
+		description: 'Summarise only these documents. Combine with or use instead of Under Path; empty = every document in scope.',
 	},
 	{
 		displayName: 'SQL',
@@ -607,6 +626,15 @@ export const documentOps: INodeProperties[] = [
 		displayOptions: { show: { resource: ['document'], operation: ['set_asset'] } },
 		description:
 			'Binary property on the input item holding the image bytes. The node base64-encodes it and sends the media type alongside. Read an asset back as n8n binary with Get Asset.',
+	},
+
+	{
+		displayName: 'Asset Filename',
+		name: 'assetFilename',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['document'], operation: ['set_asset'] } },
+		description: 'Original filename, recorded as metadata only — it does not affect storage or retrieval',
 	},
 
 	// ---- Federation (RFC CE) ----

@@ -1157,7 +1157,15 @@ async function executeDocument(
 	if (documentId) input.document_id = documentId;
 	const parentId = str('parentId');
 	if (parentId) input.parent_id = parentId;
+	// after_id overrides parent_id server-side (the parent is implied by the
+	// sibling), so both may be sent and the substrate resolves the precedence.
+	const afterId = str('afterId');
+	if (afterId) input.after_id = afterId;
 	if (operation === 'move_chunk') input.new_parent_id = str('newParentId');
+	if (operation === 'documents_summary') {
+		const documentIds = parseCsv(ctx.getNodeParameter('documentIds', i, '') as unknown);
+		if (documentIds !== undefined) input.document_ids = documentIds;
+	}
 
 	// ---- Content ----
 	const title = str('title');
@@ -1250,6 +1258,10 @@ async function executeDocument(
 		const buf = await ctx.helpers.getBinaryDataBuffer(i, prop);
 		input.data = buf.toString('base64');
 		if (meta.mimeType) input.media_type = meta.mimeType;
+		// Prefer an explicit filename, else carry through whatever the upstream
+		// node attached to the binary — metadata only either way.
+		const filename = str('assetFilename') || meta.fileName || '';
+		if (filename) input.filename = filename;
 	}
 
 	const resp = await client.document(input);
@@ -1327,6 +1339,49 @@ async function executeFact(
 
 	if (operation === 'list_facts' || operation === 'graph_recall') {
 		if (ctx.getNodeParameter('includeRefuted', i, false) as boolean) input.include_refuted = true;
+	}
+
+	// ---- Bi-temporal write fields. The substrate takes unix NANOSECONDS; the
+	// node exposes n8n dateTime pickers and converts, because hand-authoring
+	// nanos in a workflow expression is a needless footgun. ----
+	if (operation === 'upsert_chunk' || operation === 'remember') {
+		const factOptions = ctx.getNodeParameter('factOptions', i, {}) as IDataObject;
+		if (factOptions.class) input.class = factOptions.class as string;
+		// 0 is "omit", not "zero confidence" — the substrate treats an absent
+		// confidence differently from an asserted 0.
+		if (typeof factOptions.confidence === 'number' && factOptions.confidence > 0) {
+			input.confidence = factOptions.confidence;
+		}
+		const validAt = toUnixNanos(factOptions.validAt, 'Valid At', ctx, i);
+		if (validAt !== undefined) input.valid_at = validAt;
+		const invalidAt = toUnixNanos(factOptions.invalidAt, 'Invalid At', ctx, i);
+		if (invalidAt !== undefined) input.invalid_at = invalidAt;
+	}
+
+	// ---- Bi-temporal reads: answer as of a past instant, and optionally
+	// include facts since superseded. ----
+	if (operation === 'list_facts') {
+		// Verified live: List Facts filters on TYPE (with subtype expansion) and
+		// CLASS. `subject` is accepted but silently ignored, so the node does not
+		// offer it here — an ignored filter reads as a broken one.
+		const classFilter = str('classFilter');
+		if (classFilter) input.class = classFilter;
+	}
+
+	if (operation === 'list_facts' || operation === 'graph_recall') {
+		const recallOptions = ctx.getNodeParameter('recallOptions', i, {}) as IDataObject;
+		const asOf = toUnixNanos(recallOptions.asOf, 'As Of', ctx, i);
+		if (asOf !== undefined) input.as_of = asOf;
+		if (recallOptions.includeRetired === true) input.include_retired = true;
+	}
+
+	if (operation === 'graph_recall') {
+		const graphOptions = ctx.getNodeParameter('graphOptions', i, {}) as IDataObject;
+		// hops 0 is meaningful (starting chunks only), so it is sent whenever the
+		// operator set it at all — unlike confidence, where 0 means "unset".
+		if (typeof graphOptions.hops === 'number') input.hops = graphOptions.hops;
+		const seedIds = parseCsv(graphOptions.seedIds);
+		if (seedIds !== undefined) input.seed_ids = seedIds;
 	}
 
 	if (operation === 'verbatim_answer') {
@@ -1587,6 +1642,35 @@ function collectNameValuePairs(raw: unknown, key: string): Record<string, string
 }
 
 // ---- Local helpers ----
+
+/**
+ * Convert an n8n `dateTime` parameter to the unix NANOSECONDS the bi-temporal
+ * fact tier expects (RFC CC). Returns undefined for an empty value so the field
+ * is omitted rather than sent as 0 — the substrate reads an absent `valid_at` as
+ * "now" and an absent `invalid_at` as "still true", both of which differ sharply
+ * from the epoch.
+ *
+ * Milliseconds → nanoseconds is exact (×1e6), so no precision is invented; the
+ * node simply cannot express sub-millisecond instants, which no n8n picker
+ * produces anyway.
+ */
+function toUnixNanos(
+	raw: unknown,
+	label: string,
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+): number | undefined {
+	if (raw === undefined || raw === null || raw === '') return undefined;
+	const ms = Date.parse(String(raw));
+	if (Number.isNaN(ms)) {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`${label} is not a valid date/time: "${String(raw)}". Use the date picker or an ISO-8601 string.`,
+			{ itemIndex },
+		);
+	}
+	return ms * 1_000_000;
+}
 
 function parseCsv(raw: unknown): string[] | undefined {
 	if (typeof raw !== 'string' || raw.trim() === '') return undefined;

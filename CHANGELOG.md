@@ -44,9 +44,21 @@ Driving each op through the `document` MCP meta-tool before trusting the typed a
 
 Confirmed correct in the same pass: omitted `tags` leave a chunk's tags **unchanged** (the update returned them intact), a stale `revision` returns `revision conflict (you passed 1, current is 2)`, `include_metadata: false` yields clean prose with no HTML comments, and `judge_fact` refuses a verdict with no reason.
 
-### Known coverage gaps
+### Bi-temporal surface (closed in this release)
 
-The fact tier is **bi-temporal** and this release does not yet surface it: `valid_at` / `invalid_at` (when a fact was true in the world, distinct from when it was recorded), `as_of` (answer as of a past instant), `include_retired`, plus `class` (derived / evidential), `confidence`, and `hops` / `seed_ids` on Graph Recall. Also unexposed: `after_id` on Create Chunk, `document_ids` on Documents Summary, `filename` on Set Asset. None block the ops that ship here.
+The fact tier tracks **when a fact was true in the world** separately from when it was recorded, and the whole point of that is being able to ask what was true at a past instant. All of it is now exposed:
+
+- **Fact Options** on Upsert Fact / Remember — **Valid At** (backdate a fact you learned late), **Invalid At** (when it stopped being true; empty = still true), **Class** (`derived` vs `evidential`, the latter exempt from age-based pruning), **Confidence**.
+- **Recall Options** on List Facts / Graph Recall — **As Of** (answer as of a past instant, *including* facts since corrected, so a report reproduces exactly as it read then) and **Include Retired** (superseded facts; distinct from Include Refuted — retired means *replaced*, refuted means *unsupported*).
+- **Graph Options** on Graph Recall — **Hops** (0 / 1 / 2, substrate-capped) and **Seed Chunk IDs**, the alternative entry point when you already know where to start. Query is therefore not required on Graph Recall.
+
+The wire takes unix **nanoseconds**; the node takes n8n `dateTime` pickers and converts (ms × 1e6, exact). An unparseable date fails in the node rather than sending `NaN`, and an empty one is omitted — an absent `valid_at` means *now* and an absent `invalid_at` means *still true*, both sharply different from the epoch.
+
+Also closed from the same gap list: **After Sibling Chunk ID** on Create Chunk, **Document IDs** + **Under Path** on Documents Summary, and **Asset Filename** on Set Asset (falling back to the upstream binary's own filename).
+
+### A fourth wire correction, from verifying the above
+
+**`subject` does not filter List Facts.** It is accepted and silently ignored — a live `list_facts` with `subject` set returned every fact in scope. The filters that work are **`type`** (which *expands subtypes*, reporting `type_expanded_to` when it widened) and **`class`**. The node no longer offers Subject on List Facts and adds a Class Filter instead: an ignored filter reads as a broken one.
 
 ### Requires
 
