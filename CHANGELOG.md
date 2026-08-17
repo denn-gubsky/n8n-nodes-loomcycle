@@ -2,6 +2,38 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] — 2026-08-17
+
+**Minor release.** Catches the nodes up from `@loomcycle/client@^1.4.0` to **`^1.55.0`** and surfaces the first tranche of what landed upstream in between (37 new adapter methods across 51 minor releases). Phase 1 of the v1.55 catch-up. **Node count unchanged at 22** — these are new operations on existing nodes.
+
+### Changed — breaking on the wire, not in your workflows
+
+- **`allowed_tools` → `tools`** (loomcycle v1.13.0). The run body's field was renamed upstream. The n8n **parameter keeps its name** (`Allowed Tools (Comma-Separated)`), so saved workflows keep resolving — only the wire field moved. Covered by a regression test asserting both that `tools` is populated and that `allowedTools` no longer reaches the wire.
+- **`Memory op=recall` semantics narrowed upstream** and `MemorySearchEntry.kind` changed from `"memory" | "document"` to **`"fact" | "note" | "document"`** (loomcycle v1.49.0, RFC BW). Relevant to the new Search op below; no existing node consumed the old shape.
+- **AgentDef Provider dropdown is now read live** from `GET /v1/config` (loomcycle ≥ v1.38) instead of a hardcoded five-provider list. The unset default and the synthetic **code-js** provider are always offered, and the dropdown degrades to just those two if the config read fails — so authoring a code agent never depends on a successful probe.
+
+### Added
+
+- **Run — 3 new ops:**
+  - **Cancel Turn** (`cancelTurn`, RFC BH, loomcycle ≥ v1.22) — stop the in-flight turn of a live interactive run and park it at `awaiting_input`, session and transcript intact. Deliberately distinct from **Cancel**, which terminates the run.
+  - **Replay Session** (`replaySession`, RFC BJ P4, loomcycle ≥ v1.25) — replay a session's transcript into a **new** session bound to a different agent, which continues from the same context. Optional **Compress** collapses the carried history to a summary plus a recent tail.
+  - **List Runnable Agents** (`runnableAgents`, RFC BY, loomcycle ≥ v1.51) — the agents this credential may actually run, tiered server-side by access mode. Reachable with a delegated per-user token, unlike the operator-scoped Library listing.
+- **Run — image / vision input** (RFC AT, loomcycle ≥ v1.7). A new **Image Binary Properties (Comma-Separated)** field on Spawn reads named binary properties off the input item and sends them as `image` content blocks. The node base64-encodes the bytes itself; loomcycle accepts **no URL form** (an explicit SSRF refusal), and the media type is validated locally (PNG / JPEG / GIF / WebP) so an unsupported attachment names the offending property instead of failing the run opaquely. The no-image path emits a byte-identical payload to before.
+- **Run — budget crossings surfaced.** The `limit` SSE event (RFC AW, loomcycle ≥ v1.11) is folded into the Spawn result as a `limits[]` array carrying scope / severity / used / limit. Absent entirely when no budget frame arrives, so a workflow can branch on its existence.
+- **Memory — 5 new ops:**
+  - **Search** (`memorySearch`, RFC BV/BW, loomcycle ≥ v1.47) — one ranked list spanning k/v entries **and** document-chunk bodies, each hit tagged `fact` / `note` / `document`. Optional **Sources** selector; the node refuses the `documents` + one-of-`facts`/`notes` combination locally with an explanatory message rather than surfacing a raw `400 invalid_sources`.
+  - **Embed Stats** (`memoryEmbedStats`) — per provider / model / dimension embedding coverage, for spotting a multi-embedder scope before a migration.
+  - **Reembed** (`reembedMemory`), **Backfill Embeddings** (`backfillEmbeddings`), **Purge Stale Embeddings** (`purgeStaleEmbeddings`) — the embedding-maintenance trio, all gated behind an explicit **Commit** toggle that defaults to a **dry run**.
+- **Interruption — Decline** (`cancelInterrupt`, RFC BH P2, loomcycle ≥ v1.22) — decline a pending `Interruption.ask` without answering it. The agent's waiting Question tool returns a non-error "declined" and the run continues. Distinct from Resolve (supplies an answer) and from cancelling the run.
+- **Agent dropdown now works for delegated user tokens.** `loadAgents` falls back to `runnableAgents()` when the operator-scoped Library read fails — a per-user token (RFC BX) is refused on the def-plane but holds `runs:read`, so without this the dropdown was permanently empty for member credentials.
+
+### Notable design decisions
+
+- **Dry-run is the default for every destructive maintenance op.** `dry_run` already defaults true server-side; the node sends **no** `dryRun` key unless Commit is on, so the server's own default governs. Purge Stale Embeddings deletes, so committing has to be an explicit operator act.
+- **The `allowedTools` parameter name was kept deliberately.** Renaming it to match the wire would have silently broken every saved workflow that sets it; the mapping lives in one line of `execute.ts` instead.
+- **Cancel Turn is a separate operation, not a flag on Cancel.** The two hit different endpoints with sharply different consequences (park vs terminate); a test asserts Cancel Turn never reaches `cancelAgent`.
+- **Reembed drops the prefix filter.** Its endpoint accepts no `prefix`, unlike backfill / purge, so a configured prefix is deliberately not forwarded rather than being sent and ignored.
+
 ## [3.11.0] — 2026-06-28
 
 **Minor release.** Two new substrate primitives from the loomcycle 1.x line — Filesystem Volumes (RFC AH) and the Path VFS (RFC AL). Phase 2 of the v1.4 catch-up. **20 → 22 nodes** (18 action + 3 trigger + 1 sub-node).
