@@ -2,6 +2,55 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] — 2026-08-18
+
+**Minor release (full edition).** Mirrors slim-edition **3.15.0** — the governance and multi-tenancy surface. **33 → 37 nodes.**
+
+### Added — mirrored from slim 3.15.0
+
+- **LoomCycle Directory** (3 ops, ≥ v1.46) — read-only `List Users` / `Inspect Subject` / `List Tenants`.
+- **LoomCycle Erasure** (2 ops, RFC BL P5, ≥ v1.45) — `Report` and `Execute`, the latter a dry run unless explicitly committed with a retyped subject.
+- **LoomCycle User** (3 ops, RFC BX P2, ≥ v1.50) — `List` / `List Tokens` / `Revoke Token`.
+- **LoomCycle Usage** (3 ops, RFC AV / AW, ≥ v1.10 / v1.11) — `Usage Report` / `List Limits` / `Get Config`.
+
+### Scope, carried over from slim
+
+Budget writes (`Set Limit` / `Delete Limit`) and user identity CRUD (`Create` / `Update` / `Delete`) are deliberately **not** exposed: both are operator work for the loomcycle CLI / Web UI rather than a workflow side effect. `setLimit` illustrates why — it is a full-row upsert, so a tier left blank in an n8n form is *cleared to unlimited*, while a literal `0` would be a zero ceiling refusing every run. Neither is what a half-filled form intends. Both families are excluded from their op lists **and** refused in the executor, with tests asserting the op lists exactly.
+
+`Revoke Token` is the one write kept: cutting off a leaked credential is exactly what you want to automate on an alert, and it cannot silently clear anything.
+
+### No Tool sub-node for this phase
+
+Unlike Phases 2 and 3, nothing here gets an AI-Agent Tool. Erasure is irreversible, Directory and Usage expose cross-subject information, and User touches credentials — none of it is work to hand a model on the strength of a prompt. The governance surface stays operator-facing on purpose.
+
+### Preserved — full-edition divergences
+
+`Run → Wait for Completion` + `sleep()` re-applied after the mirror, the eight langchain cluster sub-nodes, the langchain Chat Model, and the SSE / long-poll triggers. Re-verified `@n8n/ai-node-sdk` has no source imports.
+
+## [2.15.0] — 2026-08-17
+
+**Minor release (full edition).** Mirrors slim-edition **3.14.0** (Agent Teams, RFC AP) and adds the **Team Tool** cluster sub-node. **31 → 33 nodes.**
+
+### Added — mirrored from slim 3.14.0
+
+- **LoomCycle Team node** (7 ops, RFC AP, loomcycle ≥ v1.17.1) — List / Get / Create / Fork / Delete / Run / Render Diagram, with a `loadTeams` dropdown. Run targets the active version by name or an exact version by `def_id`, and optionally binds a Document chunk task board so progress persists and a later run resumes.
+- The live findings behind that node carry over: handler kinds are `agent` / `parallel` / `consolidator` / `terminal`; `create` promotes by default while **`fork` does not**, so a fork is reachable only by `def_id` until promoted elsewhere.
+
+### Added — full-edition only
+
+- **LoomCycle Team Tool** — delegates a whole task to a loomcycle agent team rather than a single sub-agent. Two ops: `run` delegates, `describe` renders the pinned team's graph so the model can inspect the workflow before committing to it.
+
+### Notable design decisions
+
+- **The team is pinned by the operator, not chosen by the model** — following the `LoomCycle Sub-Agent Tool` pattern, and here it closes a real escalation path rather than merely matching convention. A team's states name arbitrary handler agents, so a model free to select the team could reach agents well outside its own tool ceiling. The config is captured once at supply/execute time, never per tool call, and a `name` or `defId` the model tries to smuggle into the args is ignored. A test asserts both.
+- **Authoring ops (`create` / `fork` / `delete`) are absent from the Tool for the same reason.** A model able to author a team could name any handler agent and thereby escape its own ceiling entirely — a far larger hole than any single tool call. They stay on the action node.
+- **`describe` exists so delegation is not blind.** An agent handing a task to a multi-agent workflow can first see what that workflow does, which matters when the alternative is a long, budget-consuming run it cannot inspect.
+- **`iteration_cap` reaches the agent as data, not as an error.** It is a legitimate terminal outcome of a team walk, so the agent needs it to decide what to do next.
+
+### Preserved — full-edition divergences
+
+`Run → Wait for Completion` + `sleep()`, the six other langchain Tool sub-nodes, the langchain Chat Model, and the SSE / long-poll triggers. Re-verified that `@n8n/ai-node-sdk` has no source imports and `@langchain/core` stays confined to `nodes/_shared/`.
+
 ## [2.14.0] — 2026-08-17
 
 **Minor release (full edition).** Mirrors slim-edition **3.13.0** (chunked-graph Documents + the RFC CC verified-writes fact tier) and adds the two langchain **Tool sub-nodes** the slim edition cannot ship. **26 → 31 nodes.**

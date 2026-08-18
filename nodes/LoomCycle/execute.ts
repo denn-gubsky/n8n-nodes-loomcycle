@@ -24,6 +24,7 @@ import type {
 	SetMemoryEntryOptions,
 	SubstrateToolInput,
 	UpdateChannelOptions,
+	UsageDimension,
 	VolumeMode,
 } from '@loomcycle/client';
 
@@ -103,6 +104,16 @@ export async function executeLoomCycle(
 				row = await executeFact(ctx, client, operation, i);
 			} else if (resource === 'documentSourceDef') {
 				row = await executeDocumentSourceDef(ctx, client, operation, i);
+			} else if (resource === 'team') {
+				row = await executeTeam(ctx, client, operation, i);
+			} else if (resource === 'directory') {
+				row = await executeDirectory(ctx, client, operation, i);
+			} else if (resource === 'erasure') {
+				row = await executeErasure(ctx, client, operation, i);
+			} else if (resource === 'user') {
+				row = await executeUser(ctx, client, operation, i);
+			} else if (resource === 'usage') {
+				row = await executeUsage(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1437,6 +1448,104 @@ async function executeDocumentSourceDef(
 }
 
 /**
+ * Agent Teams (RFC AP). Unlike the other Def families the adapter exposes SEVEN
+ * TYPED methods here rather than one op-discriminated call, so this does not go
+ * through `buildSubstrateInput`.
+ *
+ * The substrate's `promote` / `retire` / `verify` ops have no adapter wrapper, so
+ * they are deliberately absent rather than hand-rolled (CLAUDE.md: the adapter is
+ * the only wire-egress point). The practical consequence — verified live — is
+ * that a fork lands unpromoted and stays unreachable by name; Run by def_id is
+ * the way to reach it from here.
+ */
+async function executeTeam(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'list') {
+		const resp = await client.listTeams();
+		// `names` is a Go nil-slice on the wire: null, not [], when empty.
+		// Normalising here spares every downstream expression a null check.
+		return { names: resp.names ?? [] } as unknown as IDataObject;
+	}
+
+	if (operation === 'get') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		const resp = await client.getTeamDef(defId);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'create' || operation === 'fork') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		// Strict: an invalid graph is refused server-side anyway, but a JSON typo
+		// should name itself here rather than arriving as a validation error about
+		// a graph the operator never meant to send.
+		const overlay = parseJsonField(ctx.getNodeParameter('overlay', i, '{}') as unknown, {
+			strict: true,
+			node: ctx.getNode(),
+		}) as Record<string, unknown>;
+		const description = (ctx.getNodeParameter('defDescription', i, '') as string).trim();
+		if (description) overlay.description = description;
+
+		const resp =
+			operation === 'create'
+				? await client.createTeam(name, overlay)
+				: await client.forkTeam(name, overlay);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'delete') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const resp = await client.deleteTeam(name);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'renderDiagram') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const highlightState = (ctx.getNodeParameter('highlightState', i, '') as string).trim();
+		const resp = await client.renderTeamDiagram(
+			name,
+			highlightState ? { highlightState } : undefined,
+		);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'run') {
+		const targetBy = ctx.getNodeParameter('runTargetBy', i, 'name') as string;
+		const input = (ctx.getNodeParameter('input', i, '') as string).trim();
+		const boardOptions = ctx.getNodeParameter('boardOptions', i, {}) as IDataObject;
+
+		const target: {
+			name?: string;
+			defId?: string;
+			input?: string;
+			boardChunkId?: string;
+			boardScope?: 'agent' | 'user';
+		} = {};
+		if (targetBy === 'defId') {
+			target.defId = ctx.getNodeParameter('runDefId', i) as string;
+		} else {
+			target.name = ctx.getNodeParameter('runTeamName', i) as string;
+		}
+		if (input) target.input = input;
+		if (boardOptions.boardChunkId) {
+			target.boardChunkId = boardOptions.boardChunkId as string;
+			// Only meaningful alongside a board chunk, so it is not sent alone.
+			if (boardOptions.boardScope) {
+				target.boardScope = boardOptions.boardScope as 'agent' | 'user';
+			}
+		}
+
+		const resp = await client.runTeam(target);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown team operation: ${operation}`);
+}
+
+/**
  * Pre/post-tool webhook registration. `registerHook` makes loomcycle POST
  * hook payloads to a consumer-run callback URL (typically an n8n Webhook
  * trigger node). `owner` defaults to the node id so re-runs are idempotent
@@ -1743,6 +1852,207 @@ function parseJsonField(
 	}
 }
 
+
+/**
+ * Directory (loomcycle ≥ v1.46) — read-only "who is in this deployment".
+ *
+ * A "user" here is DERIVED from run activity rather than stored, which is why
+ * there is nothing to create or update; removing a footprint is the Erasure
+ * resource. `tenant` is threaded as an EXPLICIT EMPTY STRING when the operator
+ * typed one, because for an admin token `""` selects the default tenant while
+ * omitting the field entirely makes the server refuse rather than guess.
+ */
+async function executeDirectory(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'tenants') {
+		// Admin-only: a tenant-scoped token is refused outright rather than given
+		// a filtered list, and the substrate's message says so — so it passes
+		// through wrapLoomcycleError unaltered.
+		const resp = await client.directoryTenants();
+		return resp as unknown as IDataObject;
+	}
+
+	const tenantRaw = ctx.getNodeParameter('tenant', i, undefined) as string | undefined;
+	const opts = tenantRaw === undefined ? undefined : { tenant: tenantRaw };
+
+	if (operation === 'users') {
+		const resp = await client.directoryUsers(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'inspect') {
+		const subject = ctx.getNodeParameter('subject', i) as string;
+		const resp = await client.directoryInspect(subject, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown directory operation: ${operation}`);
+}
+
+/**
+ * Subject erasure (RFC BL P5, loomcycle ≥ v1.45).
+ *
+ * Two safety properties are deliberate here. `dryRun` is sent EXPLICITLY rather
+ * than relying on the server default, so a reader of this code can see which
+ * mode the request is in. And the confirm string is checked LOCALLY first: the
+ * substrate requires `confirm === subject`, and failing here means a typo cannot
+ * reach a destructive endpoint at all.
+ *
+ * The response — dry run or not — is returned verbatim because it is the only
+ * durable record of tier-3 residue.
+ */
+async function executeErasure(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const subject = ctx.getNodeParameter('subject', i) as string;
+	const tenantRaw = ctx.getNodeParameter('tenant', i, undefined) as string | undefined;
+
+	if (operation === 'report') {
+		const resp = await client.erasureReport(
+			subject,
+			tenantRaw === undefined ? undefined : { tenant: tenantRaw },
+		);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'execute') {
+		const commit = ctx.getNodeParameter('commit', i, false) as boolean;
+		const opts: { dryRun: boolean; confirm?: string; tenant?: string } = { dryRun: !commit };
+		if (tenantRaw !== undefined) opts.tenant = tenantRaw;
+
+		if (commit) {
+			const confirmSubject = (ctx.getNodeParameter('confirmSubject', i, '') as string).trim();
+			if (confirmSubject !== subject) {
+				throw new NodeOperationError(
+					ctx.getNode(),
+					`Confirm Subject must exactly match Subject to run a live erasure. Got "${confirmSubject}" for subject "${subject}". Nothing was sent.`,
+					{ itemIndex: i },
+				);
+			}
+			opts.confirm = confirmSubject;
+		}
+
+		const resp = await client.erasureExecute(subject, opts);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown erasure operation: ${operation}`);
+}
+
+/**
+ * Tenant-owned users + delegated tokens (RFC BX P2, loomcycle ≥ v1.50).
+ *
+ * The tenant is always server-derived, so no call here takes one.
+ *
+ * Scoped to reads plus one revocation. `mintUserToken` is unreachable because the
+ * substrate returns the bearer plaintext exactly once and it would land in n8n
+ * execution data (CLAUDE.md §security.6); identity CRUD is unreachable because
+ * provisioning users is operator work, not a workflow side effect. Both are
+ * absent from the op list AND refused here — the same defence-in-depth the
+ * Operator Token node uses.
+ */
+async function executeUser(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	// Refused defensively, not merely omitted from the op list. Minting returns
+	// the bearer plaintext once, so it must never be reachable; identity CRUD is
+	// operator work that belongs in the CLI / Web UI rather than in a workflow.
+	if (operation === 'mint' || operation === 'mintToken' || operation === 'rotate') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			'Minting a delegated token is not available from n8n: the substrate returns the bearer plaintext once, and it would be persisted into execution data. Mint it via the loomcycle CLI or Web UI.',
+			{ itemIndex: i },
+		);
+	}
+	if (operation === 'create' || operation === 'update' || operation === 'delete') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`User ${operation} is not available from n8n — provisioning and removing users is operator work. Do it via the loomcycle CLI or Web UI. (To remove a subject's DATA rather than its identity row, use the LoomCycle Erasure node.)`,
+			{ itemIndex: i },
+		);
+	}
+
+	if (operation === 'list') {
+		const resp = await client.listUsers();
+		return resp as unknown as IDataObject;
+	}
+
+	const subject = ctx.getNodeParameter('subject', i) as string;
+
+	if (operation === 'listTokens') {
+		const resp = await client.listUserTokens(subject);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'revokeToken') {
+		const defId = ctx.getNodeParameter('tokenDefId', i) as string;
+		const resp = await client.revokeUserToken(subject, defId);
+		return resp as unknown as IDataObject;
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown user operation: ${operation}`);
+}
+
+/**
+ * Usage attribution (RFC AV) + token budgets (RFC AW) + the instance capability
+ * report. The FinOps surface, READ-ONLY: budget writes are operator work.
+ */
+async function executeUsage(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	if (operation === 'getConfig') {
+		const resp = await client.getConfig();
+		return resp as unknown as IDataObject;
+	}
+
+	const tenant = (ctx.getNodeParameter('tenant', i, '') as string).trim();
+
+	if (operation === 'usageReport') {
+		const opts: { groupBy?: UsageDimension[]; from?: string; to?: string; tenant?: string } = {};
+		const groupBy = ctx.getNodeParameter('groupBy', i, []) as string[];
+		if (groupBy.length > 0) opts.groupBy = groupBy as UsageDimension[];
+		// The wire wants RFC3339; n8n's dateTime already emits it.
+		const from = (ctx.getNodeParameter('from', i, '') as string).trim();
+		if (from) opts.from = from;
+		const to = (ctx.getNodeParameter('to', i, '') as string).trim();
+		if (to) opts.to = to;
+		if (tenant) opts.tenant = tenant;
+		const resp = await client.usageReport(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listLimits') {
+		const resp = await client.listLimits(tenant ? { tenant } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	// Budget WRITES are deliberately unreachable: they stay operator-only even for
+	// a tenant member (RFC CB), and setLimit is a full-row upsert whose omitted
+	// tier CLEARS that ceiling — too easy to do damage with from a half-filled
+	// form. Refused rather than merely omitted from the op list.
+	if (operation === 'setLimit' || operation === 'deleteLimit') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`Usage ${operation} is not available from n8n — setting token budgets is an operator act, and setLimit is a full-row upsert that would clear any tier left blank. Manage budgets via the loomcycle CLI or Web UI.`,
+			{ itemIndex: i },
+		);
+	}
+
+	throw new NodeOperationError(ctx.getNode(), `Unknown usage operation: ${operation}`);
+}
 
 /**
  * FULL EDITION ONLY — backs the Run `wait` op.
