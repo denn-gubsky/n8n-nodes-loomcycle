@@ -1,11 +1,14 @@
-import type { IDataObject, IPollFunctions, ITriggerFunctions } from 'n8n-workflow';
+import type { IDataObject, IPollFunctions, ITriggerFunctions, IWebhookFunctions } from 'n8n-workflow';
 
 /**
  * Typed wrappers around n8n's per-node `getWorkflowStaticData('node')`.
  *
  * Trigger nodes use this to persist dedup state across invocations.
  * Polling triggers especially need it — without dedup the same row
- * would emit on every poll tick.
+ * would emit on every poll tick. The webhook-based Change Event trigger
+ * needs it for the opposite reason: loomcycle's push delivery is
+ * at-least-once and resumes from its own persisted cursor after a
+ * restart, so a batch can legitimately arrive twice.
  *
  * n8n persists this object to the workflow row; values must be JSON-
  * serialisable. We use string sets (stored as arrays + Set on access)
@@ -18,10 +21,13 @@ interface DedupShape {
 	cursor?: string;
 }
 
+/** Any context that exposes per-node static data. */
+type StaticDataCtx = IPollFunctions | ITriggerFunctions | IWebhookFunctions;
+
 const DEFAULT_CAP = 1000;
 
 export function readSeenSet(
-	ctx: IPollFunctions | ITriggerFunctions,
+	ctx: StaticDataCtx,
 	key: string,
 ): Set<string> {
 	const data = ctx.getWorkflowStaticData('node') as IDataObject;
@@ -30,7 +36,7 @@ export function readSeenSet(
 }
 
 export function writeSeenSet(
-	ctx: IPollFunctions | ITriggerFunctions,
+	ctx: StaticDataCtx,
 	key: string,
 	seen: Set<string>,
 	cap = DEFAULT_CAP,
@@ -43,7 +49,7 @@ export function writeSeenSet(
 }
 
 export function readCursor(
-	ctx: IPollFunctions | ITriggerFunctions,
+	ctx: StaticDataCtx,
 	key: string,
 ): string {
 	const data = ctx.getWorkflowStaticData('node') as IDataObject;
@@ -52,7 +58,7 @@ export function readCursor(
 }
 
 export function writeCursor(
-	ctx: IPollFunctions | ITriggerFunctions,
+	ctx: StaticDataCtx,
 	key: string,
 	cursor: string,
 ): void {

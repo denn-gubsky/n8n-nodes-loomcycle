@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Thirty nodes (26 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Thirty-two nodes (27 action + 4 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -86,7 +86,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle LLM** — `Chat` / `Embeddings` — direct calls to loomcycle's LLM gateway (`POST /v1/_llm/*`) as a workflow step: provider routing + auth + retry handled substrate-side, no agent loop. For RAG / embedding pipelines. (Distinct from the **Chat Model** sub-node, which feeds an AI Agent.)
 - **LoomCycle Memory Backend** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — versioned memory-backend definitions (in-process or external REST store + ranker) that agents' Memory tool dispatches to (RFC I; requires loomcycle ≥ v0.15).
 - **LoomCycle Operator Token** — `Get` / `List` / `Retire` — operator-token lifecycle (RFC L; requires loomcycle ≥ v0.17). **Mint + rotate are intentionally NOT here** — those return the token secret, which must not enter n8n execution data; do them via the loomcycle Web UI / CLI.
-- **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
+- **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` / `Pause Runtime` / `Resume Runtime` / `Get Runtime State` / `Resolve Probe` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link. The four runtime-maintenance ops are grouped here because they are what you reach for *around* a snapshot: pause so nothing is admitted mid-capture, capture, deploy or restore, resume. Note pausing does **not** stop runs already in flight — `Get Runtime State` reports what still is.
 - **LoomCycle Volume** — `Create` / `Get` / `List` / `List Ephemeral` / `Delete` / `Purge` — filesystem Volumes (RFC AH; requires loomcycle ≥ v1.1). Provision named ro/rw filesystem roots for agents (the runtime derives the on-disk path); since v1.1 a Volume is the only way an agent gets filesystem access. `Delete` unmaps but keeps the files; `Purge` removes the tree.
 - **LoomCycle Path** — `Resolve` / `List` / `Stat` / `Make Directory` / `Move` / `Remove` — the Path VFS (RFC AL; requires loomcycle ≥ v1.4): a Unix-like filesystem naming Memory entries / Volume mounts / Documents by human-readable path (e.g. `/docs/launch`). Scope (agent / user / tenant) resolves server-side from the bearer.
 - **LoomCycle Document** — 36 ops over the chunked-graph Document store (RFC AK + BS / BO / CE; requires loomcycle ≥ v1.4 **and SQL Memory** on the sidecar). Document + chunk lifecycle, edges and discovery (`Backlinks` / `Related` / `Unlinked Mentions`), tags, types, `Query Chunks` (structured filters, `Under Path`, or a validator-gated read-only SQL escape hatch), per-chunk `History` / `Get Version` / `Diff Revisions`, Markdown and **JSON Canvas** import-export, image assets, and peer federation (`Set Remote` / `Sync` / `Diff Remote`). A chunk body is embedded on write, which is what makes **Memory → Search** find it.
@@ -97,12 +97,14 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires loomcycle ≥ v1.45, **and the deployment must set `LOOMCYCLE_AUDIT_LOG_PATH`** from v1.55). The natural home for a **GDPR data-subject-request workflow**. Three tiers: deletable, subject-keyed-but-uncovered, and residue — facts about the subject in scopes they do not own. `Execute` is a **dry run unless you commit**, and committing additionally requires retyping the subject. **Persist the Execute output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
 - **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated bearer tokens (RFC BX P2; requires ≥ v1.50). The tenant is always server-derived, so no operation takes one. **Reads plus one revocation, by design.** Identity CRUD is absent because provisioning and removing users is operator work for the loomcycle CLI / Web UI, not a workflow side effect; `Revoke Token` stays because cutting off a leaked credential is exactly what you want to automate on an alert. **Minting is absent for a stronger reason** — the substrate returns the bearer plaintext once, and it must not land in execution data.
 - **LoomCycle Usage** — `Usage Report` / `List Limits` / `Get Config` — token + cost attribution (RFC AV; ≥ v1.10) and a read of the per-scope token budgets (RFC AW; ≥ v1.11). Group a report by `source` to see **which key actually paid** — operator vs tenant. **Read-only by design:** budget writes stay operator-only even for a tenant member, and `setLimit` is a full-row upsert whose omitted tier *clears* that ceiling — too easy to do damage with from a half-filled form. Set budgets via the CLI / Web UI.
+- **LoomCycle History** — `List` / `Get` / `Search` / `Related` / `Rename` / `Annotate` / `Pin` / `Archive` / `Recap` / `Resume` — past chats as first-class objects (RFC BE; requires loomcycle ≥ v1.20). The owner is resolved server-side, so you pick a **scope** (self / user / tenant / global — the last admin-only) rather than naming one. `Get` renders a transcript as structured events, full Markdown, or **Conversation** (user and assistant turns only) — use the last when feeding a chat to a model, since it strips the tool traffic that is usually most of the tokens. ⚠️ **`Search` matches the chat TITLE only**, not content or summaries; **`Related`** is the semantic path and is what you want for "find the conversation about X".
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
 ### Trigger nodes
 
 All three triggers use n8n's **polling** framework (`poll()`), scheduled by n8n's Poll Times — no in-node timers (n8n Cloud forbids timer primitives in community nodes). Detection latency is the poll interval.
+- **LoomCycle: Change Event** — the one genuinely **event-driven** trigger here (RFC CD Part C; requires loomcycle ≥ v1.54 and `LOOMCYCLE_MEMORY_CHANGES_ENABLED=1`). loomcycle POSTs HMAC-signed batches to this node's webhook URL on every memory / document write, so it needs no polling. Events are **value-free** — each carries the *coordinate* of what changed, never the value — so follow it with Memory → Get Entry or Document → Get Chunk to read the current state. Signature verification **fails closed**, and because delivery is at-least-once with a persisted cursor on the loomcycle side, the node dedupes on the monotonic `seq`. Subscriptions are operator-yaml only: add a `change_subscriptions:` entry pointing `callback_url` at the Production webhook URL.
 
 - **LoomCycle: Run Completed** — polls for agent runs that have reached a terminal state (completed / failed / cancelled), deduping via workflow static data. Filterable by status + `parentAgentId`.
 - **LoomCycle: Channel Message** — polls a channel each tick: `auto-ack` (at-most-once, `subscribeChannel` poll-once) or `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
@@ -250,6 +252,8 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | **Subject erasure** (RFC BL P5) — Erasure node | **v1.45** | also needs `LOOMCYCLE_AUDIT_LOG_PATH` from v1.55 |
 | Directory (derived users / tenants) | **v1.46** | Directory node; List Tenants is admin-only |
 | **Delegated users + tokens** (RFC BX) — User node | **v1.50** | needs a persistent store (503 otherwise) |
+| **Chat history** (RFC BE) — History node | **v1.20** | Search is title-only; Related is the semantic path |
+| **Memory / document change feed** (RFC CD Part C) — Change Event trigger | **v1.54** | also needs `LOOMCYCLE_MEMORY_CHANGES_ENABLED=1` + a `change_subscriptions:` yaml entry |
 | Runnable-agent discovery (RFC BY) | **v1.51** | Run → List Runnable Agents; agent dropdown fallback |
 | **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
 | Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |
@@ -279,6 +283,14 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 ### `@loomcycle/client` (bundled, not a runtime dependency)
 
 `@loomcycle/client` (`^1.55.0`) is **bundled into the published nodes at build time** (esbuild), so the package ships with **zero runtime dependencies** — the requirement for n8n Cloud verification. It's a devDependency here, not a peer/runtime dep. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. `n8n-workflow` is the only peer; `@n8n/ai-node-sdk` (used by the Chat Model) is provided by the n8n host at runtime.
+
+### Which credential do I need?
+
+Most nodes work with any bearer, but the scope matters for some:
+
+- **Operator-admin** — Directory → List Tenants, cross-tenant focus anywhere, Operator Token, Memory Backend, Document Source, A2A, Webhook.
+- **Operator / tenant** — the substrate def plane (AgentDef, SkillDef, MCP Server, Schedule, Team), Snapshot and its runtime ops, Erasure, User.
+- **A plain tenant member is enough for more than it used to be.** Since loomcycle **v1.53.2 (RFC CB)** a non-isolated `runs:*` / `channel:*` user token reaches the tenant's **Library, Documents and Memory over HTTP** with no new scope and no re-mint — which is what makes the Document, Fact and Memory nodes usable from a delegated per-user credential. Two caveats: an **isolated** token is still confined to its own user scope, and the carve-out is **HTTP-only**, so gRPC / MCP parity is deferred upstream.
 
 ### Known upstream gaps
 

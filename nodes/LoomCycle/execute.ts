@@ -9,6 +9,7 @@ import type {
 	CreateChannelOptions,
 	HookFailMode,
 	HookPhase,
+	HistoryToolInput,
 	InterruptStatus,
 	CreateSnapshotOptions,
 	DocumentToolInput,
@@ -114,6 +115,8 @@ export async function executeLoomCycle(
 				row = await executeUser(ctx, client, operation, i);
 			} else if (resource === 'usage') {
 				row = await executeUsage(ctx, client, operation, i);
+			} else if (resource === 'history') {
+				row = await executeHistory(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1052,6 +1055,26 @@ async function executeSnapshot(
 			opts.snapshotId = ctx.getNodeParameter('snapshotId', i) as string;
 		}
 		const resp = await client.restoreSnapshot(opts);
+		return resp as unknown as IDataObject;
+	}
+
+	// Runtime maintenance, grouped here because these are the calls you make
+	// AROUND a snapshot: pause so nothing is admitted mid-capture, capture,
+	// deploy or restore, resume. None takes an argument.
+	if (operation === 'pauseRuntime') {
+		const resp = await client.pauseRuntime();
+		return resp as unknown as IDataObject;
+	}
+	if (operation === 'resumeRuntime') {
+		const resp = await client.resumeRuntime();
+		return resp as unknown as IDataObject;
+	}
+	if (operation === 'getRuntimeState') {
+		const resp = await client.getRuntimeState();
+		return resp as unknown as IDataObject;
+	}
+	if (operation === 'resolveProbe') {
+		const resp = await client.resolveProbe();
 		return resp as unknown as IDataObject;
 	}
 
@@ -2027,4 +2050,92 @@ async function executeUsage(
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown usage operation: ${operation}`);
+}
+
+/**
+ * Past chats as first-class objects (RFC BE, loomcycle ≥ v1.20). Op-discriminated
+ * passthrough to `client.history(...)`.
+ *
+ * The owner is resolved server-side from the authenticated principal, so a caller
+ * picks a SCOPE selector and never an owner id.
+ *
+ * `related` is the only op with two mutually exclusive inputs: the substrate
+ * accepts `query` OR `session_id`, never both, so the node makes that a radio
+ * choice rather than two fields an operator could fill in together.
+ */
+async function executeHistory(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const input: HistoryToolInput = {
+		op: operation as HistoryToolInput['op'],
+		scope: ctx.getNodeParameter('scope', i, 'self') as HistoryToolInput['scope'],
+	};
+
+	const str = (name: string): string => (ctx.getNodeParameter(name, i, '') as string).trim();
+
+	if (['get', 'rename', 'annotate', 'pin', 'archive', 'recap', 'resume'].includes(operation)) {
+		input.session_id = ctx.getNodeParameter('sessionId', i) as string;
+	}
+
+	if (operation === 'get') {
+		// '' means the default structured event array, so it is omitted rather
+		// than sent as an empty format.
+		const format = str('format');
+		if (format) input.format = format;
+	}
+
+	if (operation === 'list' || operation === 'search') {
+		const filters = ctx.getNodeParameter('filters', i, {}) as IDataObject;
+		if (filters.status) input.status = filters.status as string;
+		if (filters.from) input.from = filters.from as string;
+		if (filters.to) input.to = filters.to as string;
+		if (filters.tag) input.tag = filters.tag as string;
+		if (filters.titleContains) input.title_contains = filters.titleContains as string;
+		if (filters.pinnedOnly === true) input.pinned_only = true;
+		if (filters.includeArchived === true) input.include_archived = true;
+		if (filters.includeInternal === true) input.include_internal = true;
+		if (typeof filters.offset === 'number' && filters.offset > 0) input.offset = filters.offset;
+	}
+
+	if (operation === 'search') {
+		// Title-only substring match — see the field description. Named `query`
+		// on the wire despite not being a content search.
+		input.query = ctx.getNodeParameter('query', i) as string;
+	}
+
+	if (operation === 'related') {
+		const by = ctx.getNodeParameter('relatedBy', i, 'query') as string;
+		if (by === 'session') {
+			input.session_id = ctx.getNodeParameter('relatedSessionId', i) as string;
+		} else {
+			input.query = ctx.getNodeParameter('relatedQuery', i) as string;
+		}
+	}
+
+	if (operation === 'rename') input.title = ctx.getNodeParameter('title', i) as string;
+
+	if (operation === 'annotate') {
+		const description = str('chatDescription');
+		if (description) input.description = description;
+		// Tags REPLACE the existing set, so an empty CSV is omitted rather than
+		// sent as [] — that would clear them.
+		const tags = parseCsv(ctx.getNodeParameter('tags', i, '') as unknown);
+		if (tags !== undefined) input.tags = tags;
+	}
+
+	// Booleans are sent explicitly: `false` is the meaningful unpin / unarchive
+	// instruction, not an absent value.
+	if (operation === 'pin') input.pinned = ctx.getNodeParameter('pinned', i, true) as boolean;
+	if (operation === 'archive') input.archived = ctx.getNodeParameter('archived', i, true) as boolean;
+
+	if (['list', 'search', 'related'].includes(operation)) {
+		const limit = ctx.getNodeParameter('limit', i, 0) as number;
+		if (limit > 0) input.limit = limit;
+	}
+
+	const resp = await client.history(input);
+	return resp as unknown as IDataObject;
 }

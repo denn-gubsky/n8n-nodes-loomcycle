@@ -2,6 +2,40 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.0] — 2026-08-18
+
+**Minor release.** Chat history, the first genuinely event-driven trigger, and runtime maintenance. **Phase 5 — the final phase of the v1.55 catch-up.** 30 → 32 nodes.
+
+### Added
+
+- **LoomCycle History node** (10 ops, RFC BE, loomcycle ≥ v1.20) — `List` / `Get` / `Search` / `Related` / `Rename` / `Annotate` / `Pin` / `Archive` / `Recap` / `Resume`. Past chats as first-class objects, with the owner resolved server-side so a caller picks a **scope** (self / user / tenant / global) rather than naming one.
+- **LoomCycle: Change Event trigger** (RFC CD Part C, ≥ v1.54) — loomcycle POSTs HMAC-signed batches to this node's webhook URL on every memory / document write. **No polling**, because the runtime pushes.
+- **Snapshot node gains 4 runtime-maintenance ops** — `Pause Runtime` / `Resume Runtime` / `Get Runtime State` / `Resolve Probe`. Grouped there because they are what you reach for *around* a snapshot: pause so nothing is admitted mid-capture, capture, deploy or restore, resume.
+
+### Verified against a live loomcycle v1.55 before implementing
+
+The most consequential finding in this phase, and it changes how the node reads:
+
+- **`history` op=search matches the chat TITLE only.** A query of `"agentic memory"` returned **zero** results against a deployment holding a chat whose own summary is entirely about agentic memory architectures. It is a case-insensitive substring on the title, not a content or summary search — the substrate's own docs call it a "metadata MVP". Both the operation description and the Query field now say so explicitly, and point at **Related**.
+- **`related` is the real content-aware path** and works: it scored the same chat 0.58 for `"agentic memory architectures"` and returned it. It takes `query` **or** `session_id`, never both, so the node makes that a radio choice rather than two fields an operator could fill in together.
+- `format` has a **third** value beyond the documented `markdown`: **`conversation`**, which renders only user and assistant turns — no header, no tool traffic, no runtime payloads. Exposed as its own option, because that is the one to use when feeding a chat to a model.
+- `include_internal` exists and defaults off: chats served by loomcycle's own maintenance agents are runtime bookkeeping rather than conversations.
+- A listing carries each chat's **rolling summary**, which for a long conversation is many kilobytes. A note on the node warns to page with Offset rather than raising the limit.
+
+### Notable design decisions
+
+- **Signature verification fails closed.** The Change Event trigger verifies HMAC-SHA256 over `req.rawBody` — the exact bytes loomcycle signed — using a constant-time compare. If the raw body is unavailable the node **refuses the request** rather than falling back to re-serialising the parsed body, whose key order and whitespace would not match what was signed. An unsigned, wrongly-signed or unverifiable request is never accepted; the endpoint URL is the only other thing protecting it.
+- **Dedupe on `seq`, not arrival.** Delivery is at-least-once and loomcycle resumes from its own persisted cursor across restarts, so a repeated batch is expected rather than exceptional. A replay is acknowledged (so loomcycle advances) but starts no execution; a partially-overlapping batch emits only the new events. An event with no usable `seq` passes through — dropping it would lose data to guard against a duplicate that may not exist.
+- **An unrecognised envelope degrades to pass-through.** The extractor accepts `events` / `changes` / `items`, and otherwise treats the whole body as one event, so a future shape change surfaces data rather than silently emitting nothing.
+- **`Annotate` omits an empty tag CSV.** The tag set *replaces* the existing one, so sending `[]` would clear a chat's tags as a side effect of editing only its description.
+- **`Pin` / `Archive` always send their boolean.** Unlike the list filters, `false` here is the meaningful *unpin* / *unarchive* instruction rather than an absent value.
+- **`Get`'s structured default is an omitted `format`**, not an empty string.
+- The static-data helpers were widened to accept `IWebhookFunctions`, since a webhook trigger needs the same cursor persistence a polling one does.
+
+### Docs
+
+The README gains a **"Which credential do I need?"** section. The point worth surfacing: since **v1.53.2 (RFC CB)** a non-isolated tenant-member token reaches the tenant's Library, Documents and Memory over HTTP with no new scope and no re-mint — which is what makes the Document, Fact and Memory nodes usable from a delegated per-user credential. An **isolated** token is still confined, and the carve-out is HTTP-only.
+
 ## [3.15.0] — 2026-08-17
 
 **Minor release.** The governance and multi-tenancy surface — who is in the deployment, what is held about them, who may act, and what it costs. Phase 4 of the v1.55 catch-up. **26 → 30 nodes.**

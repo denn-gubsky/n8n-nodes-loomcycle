@@ -49,16 +49,40 @@ export const snapshotOps: INodeProperties[] = [
 				action: 'Get a snapshot',
 			},
 			{
+				name: 'Get Runtime State',
+				value: 'getRuntimeState',
+				description: 'Report whether the runtime is paused, and what is still in flight',
+				action: 'Get runtime state',
+			},
+			{
 				name: 'List',
 				value: 'list',
 				description: 'List captured snapshots (most recent first)',
 				action: 'List snapshots',
 			},
 			{
+				name: 'Pause Runtime',
+				value: 'pauseRuntime',
+				description: 'Stop admitting new runs — the safe moment to take a snapshot or deploy',
+				action: 'Pause the runtime',
+			},
+			{
+				name: 'Resolve Probe',
+				value: 'resolveProbe',
+				description: 'Force a re-probe of the provider / model resolver, refreshing what it believes is reachable',
+				action: 'Reprobe the resolver',
+			},
+			{
 				name: 'Restore',
 				value: 'restore',
 				description: 'Restore state from a snapshot ID or an inline envelope (idempotent)',
 				action: 'Restore a snapshot',
+			},
+			{
+				name: 'Resume Runtime',
+				value: 'resumeRuntime',
+				description: 'Start admitting runs again after a pause',
+				action: 'Resume the runtime',
 			},
 		],
 		default: 'list',
@@ -185,5 +209,17 @@ export const snapshotOps: INodeProperties[] = [
 				description: 'Max number of results to return',
 			},
 		],
+	},
+	{
+		displayName: 'Pause / Resume / Get Runtime State / Resolve Probe are runtime-maintenance operations rather than snapshot operations. They live here because they are what you reach for around a snapshot: pause so nothing is admitted mid-capture, snapshot, deploy or restore, then resume. Pausing does NOT stop runs already in flight — Get Runtime State reports what is still running.',
+		name: 'runtimeOpsNotice',
+		type: 'notice',
+		default: '',
+		displayOptions: {
+			show: {
+				resource: ['snapshot'],
+				operation: ['pauseRuntime', 'resumeRuntime', 'getRuntimeState', 'resolveProbe'],
+			},
+		},
 	},
 ];

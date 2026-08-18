@@ -21,6 +21,7 @@ export { directoryOps } from './directory';
 export { erasureOps } from './erasure';
 export { userOps } from './user';
 export { usageOps } from './usage';
+export { historyOps } from './history';
 export { documentOps } from './document';
 export { factOps } from './fact';
 export { documentSourceDefOps } from './documentsourcedef';
