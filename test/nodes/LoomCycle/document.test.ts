@@ -353,3 +353,54 @@ describe('LoomCycle resource=document', () => {
 		});
 	});
 });
+
+// A Path is accepted VERBATIM by the substrate as document_id — it does not
+// check the document exists — so passing one silently creates an orphan chunk
+// that is stored, retrievable by id, and invisible everywhere else. Confirmed
+// against a live v1.55 after a real workflow hit it.
+describe('LoomCycle document — Path-vs-ID guard', () => {
+	it('refuses a Path in Document ID before any wire call', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'document',
+				operation: 'create_chunk',
+				scope: 'user',
+				documentId: '/documents/news/tech-news',
+				title: 'News',
+				body: 'x',
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/looks like a Path/);
+		expect(mockClient.document).not.toHaveBeenCalled();
+	});
+
+	it('names the remedy in the error', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'document',
+				operation: 'create_chunk',
+				scope: 'user',
+				documentId: '/documents/news/tech-news',
+			},
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/Get Document/);
+	});
+
+	it('still accepts a real hex document ID', async () => {
+		mockClient.document.mockResolvedValue({ id: 'c1' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'document',
+				operation: 'create_chunk',
+				scope: 'user',
+				documentId: 'eeb875af6f6d9deb5b26a24c56c38b9e',
+				body: 'x',
+			},
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.document.mock.calls[0][0].document_id).toBe('eeb875af6f6d9deb5b26a24c56c38b9e');
+	});
+});

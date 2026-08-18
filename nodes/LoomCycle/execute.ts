@@ -1188,7 +1188,10 @@ async function executeDocument(
 	const path = str('path');
 	if (path) input.path = path;
 	const documentId = str('documentId');
-	if (documentId) input.document_id = documentId;
+	if (documentId) {
+		assertNotAPath(documentId, 'Document ID', ctx, i);
+		input.document_id = documentId;
+	}
 	const parentId = str('parentId');
 	if (parentId) input.parent_id = parentId;
 	// after_id overrides parent_id server-side (the parent is implied by the
@@ -1350,7 +1353,10 @@ async function executeFact(
 	const sourceQuote = str('sourceQuote');
 	if (sourceQuote) input.source_quote = sourceQuote;
 	const documentId = str('documentId');
-	if (documentId) input.document_id = documentId;
+	if (documentId) {
+		assertNotAPath(documentId, 'Document ID', ctx, i);
+		input.document_id = documentId;
+	}
 	const query = str('query');
 	if (query) input.query = query;
 
@@ -1802,6 +1808,33 @@ function toUnixNanos(
 		);
 	}
 	return ms * 1_000_000;
+}
+
+/**
+ * Reject a Path where a document ID is expected.
+ *
+ * The substrate accepts `document_id` VERBATIM and does not check that the
+ * document exists, so passing a Path-tree path (`/documents/news/tech-news`)
+ * silently creates an ORPHAN chunk: it is stored, `get_chunk` retrieves it, and
+ * the write reports success — but no document owns it, so nothing in the UI or
+ * in `query_chunks` can ever render it. Confirmed against a live v1.55.
+ *
+ * A leading slash is the reliable tell: document IDs are hex, paths start with
+ * `/`. Failing here converts a silent data-orphaning bug into a message that
+ * names the fix.
+ */
+function assertNotAPath(
+	value: string,
+	fieldLabel: string,
+	ctx: IExecuteFunctions,
+	itemIndex: number,
+): void {
+	if (!value.startsWith('/')) return;
+	throw new NodeOperationError(
+		ctx.getNode(),
+		`${fieldLabel} looks like a Path ("${value}"), but this field needs a document ID. A path is not accepted here and the substrate would store the chunk against a document that does not exist, leaving it invisible. Resolve the path first: run Get Document with Path "${value}" and use the document_id it returns.`,
+		{ itemIndex },
+	);
 }
 
 function parseCsv(raw: unknown): string[] | undefined {

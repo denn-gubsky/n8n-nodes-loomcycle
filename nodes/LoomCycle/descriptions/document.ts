@@ -335,7 +335,7 @@ export const documentOps: INodeProperties[] = [
 				operation: ['create_chunk', 'query_chunks', 'import_md', 'import_canvas', 'list_tags'],
 			},
 		},
-		description: 'The document these chunks belong to. On Import Markdown / Import Canvas, omit to create a NEW document; supply it to import under an existing one.',
+		description: 'The document these chunks belong to — a document **ID**, not a Path. A path such as `/documents/news/tech-news` is silently accepted by the substrate and produces an invisible orphan chunk, so run Get Document with that path first and use the `document_id` it returns. On Import Markdown / Import Canvas, omit to create a NEW document; supply it to import under an existing one.',
 	},
 
 	// ---- Parent / new parent ----

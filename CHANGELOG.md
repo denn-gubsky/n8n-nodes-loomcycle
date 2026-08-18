@@ -2,6 +2,24 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.1] — 2026-08-18
+
+**Patch.** Guards against a silent data-orphaning trap found by a real workflow.
+
+### Fixed
+
+- **A Path in `Document ID` is now refused instead of orphaning a chunk.** The substrate accepts `document_id` **verbatim and does not check that the document exists**, so passing a Path-tree path (`/documents/news/tech-news`) where an ID belongs reported success, stored the chunk, and left it **invisible** — no document owned it, so neither the UI nor `query_chunks` could ever render it. Only `get_chunk` by its raw id could reach it.
+
+  Confirmed against a live v1.55: the orphan was retrievable by id with `document_id` set to the literal path, while the real document at that path contained only its root and one other chunk.
+
+  `Document → Create Chunk` / `Update Chunk` and `Fact → Upsert Fact` now fail before the wire call when the field starts with `/`, and the message names the fix — run **Get Document** with that path and use the `document_id` it returns. A leading slash is the reliable tell, since document IDs are hex.
+
+- Both field descriptions now say **ID, not Path**, so the trap is visible while configuring rather than after the run.
+
+### Why a guard rather than resolving the path automatically
+
+Silently resolving would be worse. `Get Document` by path is a separate call whose failure mode (no such path) matters to the caller, and quietly turning one op into two would hide that. A workflow that means to write into a known document should hold its ID; failing loudly is what turns this from a data-integrity bug into a two-second fix.
+
 ## [3.16.0] — 2026-08-18
 
 **Minor release.** Chat history, the first genuinely event-driven trigger, and runtime maintenance. **Phase 5 — the final phase of the v1.55 catch-up.** 30 → 32 nodes.
