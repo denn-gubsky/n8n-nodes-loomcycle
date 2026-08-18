@@ -404,3 +404,63 @@ describe('LoomCycle document — Path-vs-ID guard', () => {
 		expect(mockClient.document.mock.calls[0][0].document_id).toBe('eeb875af6f6d9deb5b26a24c56c38b9e');
 	});
 });
+
+// Get / Delete Document address a document by EITHER id or path. The original
+// single required-ID field made the path route unreachable in the n8n UI, which
+// blocked the documented remedy for the orphan-chunk trap.
+describe('LoomCycle document — addressing by ID or Path', () => {
+	it('Get Document works with only a Path', async () => {
+		mockClient.document.mockResolvedValue({ document_id: 'eeb875af', title: 'Tech News' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: {
+				resource: 'document',
+				operation: 'get_document',
+				scope: 'user',
+				path: '/documents/news/tech-news',
+			},
+		});
+		const result = await node.execute.call(ctx);
+		expect(mockClient.document).toHaveBeenCalledWith({
+			op: 'get_document',
+			scope: 'user',
+			path: '/documents/news/tech-news',
+		});
+		// This is the call that yields the real document_id for Create Chunk.
+		expect((result[0][0].json as Record<string, unknown>).result).toMatchObject({
+			document_id: 'eeb875af',
+		});
+	});
+
+	it('Get Document works with only an ID', async () => {
+		mockClient.document.mockResolvedValue({ document_id: 'eeb875af' });
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: { resource: 'document', operation: 'get_document', scope: 'user', id: 'eeb875af' },
+		});
+		await node.execute.call(ctx);
+		expect(mockClient.document).toHaveBeenCalledWith({
+			op: 'get_document',
+			scope: 'user',
+			id: 'eeb875af',
+		});
+	});
+
+	it('refuses Get Document with neither ID nor Path', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: { resource: 'document', operation: 'get_document', scope: 'user' },
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/either ID or Path/);
+		expect(mockClient.document).not.toHaveBeenCalled();
+	});
+
+	it('refuses Delete Document with neither ID nor Path', async () => {
+		const node = new LoomCycle();
+		const ctx = makeExecuteContext({
+			params: { resource: 'document', operation: 'delete_document', scope: 'user' },
+		});
+		await expect(node.execute.call(ctx)).rejects.toThrow(/either ID or Path/);
+		expect(mockClient.document).not.toHaveBeenCalled();
+	});
+});

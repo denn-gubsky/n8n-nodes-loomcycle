@@ -1187,6 +1187,20 @@ async function executeDocument(
 	if (id) input.id = id;
 	const path = str('path');
 	if (path) input.path = path;
+
+	// Get / Delete Document address a document by EITHER id or path. Requiring
+	// both would block the path route; requiring neither would send a request
+	// that cannot identify anything, so check it here where the message can say
+	// which two fields are involved.
+	if (operation === 'get_document' || operation === 'delete_document') {
+		if (!id && !path) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Supply either ID or Path to address the document — both are empty.',
+				{ itemIndex: i },
+			);
+		}
+	}
 	const documentId = str('documentId');
 	if (documentId) {
 		assertNotAPath(documentId, 'Document ID', ctx, i);

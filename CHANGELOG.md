@@ -16,6 +16,10 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 
 - Both field descriptions now say **ID, not Path**, so the trap is visible while configuring rather than after the run.
 
+- **`Get` / `Delete Document` can now be addressed by Path alone.** `ID` was a single `required: true` field spanning 23 operations, including these two — so n8n demanded an ID even though the substrate accepts either, making the path route unreachable in the UI. That also blocked the documented remedy for the orphan-chunk trap above: "run Get Document with the path" was impossible to actually do.
+
+  The field is now split — optional for `Get` / `Delete Document`, still required for the chunk-level ops and for `Set Path` / `Export` / `Set Remote` / `Sync` / `Diff Remote`, which genuinely take an ID only. The executor refuses the case where both are empty, naming both fields. `Path` is also now offered on `Delete Document`, which the substrate accepts too.
+
 ### Why a guard rather than resolving the path automatically
 
 Silently resolving would be worse. `Get Document` by path is a separate call whose failure mode (no such path) matters to the caller, and quietly turning one op into two would hide that. A workflow that means to write into a known document should hold its ID; failing loudly is what turns this from a data-integrity bug into a two-second fix.
