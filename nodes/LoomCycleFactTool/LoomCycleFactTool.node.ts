@@ -61,7 +61,10 @@ const FactInputSchema = z.object({
 		.string()
 		.optional()
 		.describe('Entity type, e.g. person / project. On list_facts this is the filter, and it INCLUDES SUBTYPES. Note list_facts does NOT filter by subject.'),
-	document_id: z.string().optional().describe('Document to file the fact under. REQUIRED for upsert_chunk — a fact is still a chunk.'),
+	document_id: z
+		.string()
+		.optional()
+		.describe('Document to file the fact under, as a document ID (hex) — NOT a path. REQUIRED for upsert_chunk, since a fact is still a chunk. If you only have a path, call the Document tool op=get_document first.'),
 	natural_key: z
 		.string()
 		.optional()
@@ -199,6 +202,7 @@ async function runFactOp(
 	if (args.op === 'upsert_chunk' && !args.document_id) {
 		throw new Error('document_id is required for upsert_chunk — a fact is a chunk, so it must live in a document');
 	}
+	assertNotAPath(args.document_id, 'document_id');
 	if (args.op === 'remember' && !args.text) {
 		throw new Error('text is required for remember');
 	}
@@ -230,4 +234,21 @@ async function runFactOp(
 	}
 
 	return client.document(input);
+}
+
+/**
+ * Reject a Path where a document ID is expected.
+ *
+ * The substrate takes `document_id` verbatim and does not check the document
+ * exists, so a path produces an ORPHAN chunk: stored, reported as success, and
+ * invisible to the UI and to `query_chunks` forever after. A model is MORE
+ * likely to hit this than a human — told "the document is at /documents/news",
+ * it will pass exactly that. The thrown message becomes the tool result, so the
+ * model can read it and retry with get_document.
+ */
+function assertNotAPath(value: string | undefined, field: string): void {
+	if (!value || !value.startsWith('/')) return;
+	throw new Error(
+		`${field} looks like a Path ("${value}") but must be a document ID. Call op=get_document with path="${value}" first and use the document_id it returns.`,
+	);
 }

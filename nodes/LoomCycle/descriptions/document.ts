@@ -259,6 +259,21 @@ export const documentOps: INodeProperties[] = [
 
 	// ---- ID: chunk-or-document identifier, per op ----
 	{
+		// Split from the required variant below because Get / Delete Document
+		// accept EITHER an id or a Path. Marking ID required for them made the
+		// path route unreachable in the UI — n8n demands the field before it will
+		// run the node.
+		displayName: 'ID',
+		name: 'id',
+		type: 'string',
+		default: '',
+		displayOptions: {
+			show: { resource: ['document'], operation: ['get_document', 'delete_document'] },
+		},
+		description:
+			'Document ID to address. Leave empty and fill Path instead if you only have the path — supply exactly one of the two.',
+	},
+	{
 		displayName: 'ID',
 		name: 'id',
 		type: 'string',
@@ -268,8 +283,6 @@ export const documentOps: INodeProperties[] = [
 			show: {
 				resource: ['document'],
 				operation: [
-					'get_document',
-					'delete_document',
 					'get_chunk',
 					'update_chunk',
 					'delete_chunk',
@@ -294,7 +307,8 @@ export const documentOps: INodeProperties[] = [
 				],
 			},
 		},
-		description: 'The target ID — a DOCUMENT ID for Get / Delete Document, Set Path, Export, Set Remote, Sync and Diff Remote; a CHUNK ID for every chunk-level op. Get Document also accepts a Path instead.',
+		description:
+			'The target ID — a CHUNK ID for the chunk-level ops (Get / Update / Delete / Move / Reorder Chunk, tags, assets, history, diff, backlinks, related, unlinked mentions); a DOCUMENT ID for Set Path, Export Markdown / Canvas, Set Remote, Sync and Diff Remote. These take an ID only, never a Path.',
 	},
 
 	// ---- Path: create / address a document by name ----
@@ -305,7 +319,7 @@ export const documentOps: INodeProperties[] = [
 		default: '',
 		placeholder: '/docs/launch',
 		displayOptions: {
-			show: { resource: ['document'], operation: ['create_document', 'get_document', 'set_path'] },
+			show: { resource: ['document'], operation: ['create_document', 'get_document', 'delete_document', 'set_path'] },
 		},
 		description:
 			'Path-tree name for the document (e.g. /docs/launch). On Create Document this names the new document; on Get Document it is an alternative to ID; on Set Path it is the new name. Requires the Path VFS (loomcycle ≥ v1.4).',
@@ -335,7 +349,7 @@ export const documentOps: INodeProperties[] = [
 				operation: ['create_chunk', 'query_chunks', 'import_md', 'import_canvas', 'list_tags'],
 			},
 		},
-		description: 'The document these chunks belong to. On Import Markdown / Import Canvas, omit to create a NEW document; supply it to import under an existing one.',
+		description: 'The document these chunks belong to — a document **ID**, not a Path. A path such as `/documents/news/tech-news` is silently accepted by the substrate and produces an invisible orphan chunk, so run Get Document with that path first and use the `document_id` it returns. On Import Markdown / Import Canvas, omit to create a NEW document; supply it to import under an existing one.',
 	},
 
 	// ---- Parent / new parent ----

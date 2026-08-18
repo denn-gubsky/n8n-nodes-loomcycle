@@ -250,3 +250,47 @@ describe('LoomCycleFactTool', () => {
 		expect(out[0][0].json).toMatchObject({ answer: 'CET' });
 	});
 });
+
+// A model is MORE likely to hit the path-vs-ID trap than a human: told "the
+// document is at /documents/news/tech-news", it will pass exactly that. The
+// substrate takes document_id verbatim, so the result would be an invisible
+// orphan chunk reported as success. The thrown message becomes the tool result,
+// so the model can read it and retry correctly.
+describe('Path-vs-ID guard on the Tool sub-nodes', () => {
+	it('Document Tool refuses a path as document_id and names the remedy', async () => {
+		const tool = await documentTool();
+		const out = await tool.invoke({
+			op: 'create_chunk',
+			document_id: '/documents/news/tech-news',
+			body: 'x',
+		});
+		const err = (JSON.parse(out) as { error?: string }).error ?? '';
+		expect(err).toContain('looks like a Path');
+		expect(err).toContain('get_document');
+		expect(mockClient.document).not.toHaveBeenCalled();
+	});
+
+	it('Fact Tool refuses a path as document_id', async () => {
+		const tool = await factTool();
+		const out = await tool.invoke({
+			op: 'upsert_chunk',
+			document_id: '/documents/news/tech-news',
+			subject: 'x',
+			body: 'y',
+		});
+		expect((JSON.parse(out) as { error?: string }).error).toContain('looks like a Path');
+		expect(mockClient.document).not.toHaveBeenCalled();
+	});
+
+	it('both still accept a real hex document ID', async () => {
+		mockClient.document.mockResolvedValue({ id: 'c1' });
+		const doc = await documentTool();
+		await doc.invoke({ op: 'create_chunk', document_id: 'eeb875af6f6d9deb5b26a24c56c38b9e', body: 'x' });
+		expect(mockClient.document.mock.calls[0][0].document_id).toBe('eeb875af6f6d9deb5b26a24c56c38b9e');
+
+		mockClient.document.mockClear();
+		const fact = await factTool();
+		await fact.invoke({ op: 'upsert_chunk', document_id: 'eeb875af6f6d9deb5b26a24c56c38b9e', body: 'y' });
+		expect(mockClient.document.mock.calls[0][0].document_id).toBe('eeb875af6f6d9deb5b26a24c56c38b9e');
+	});
+});

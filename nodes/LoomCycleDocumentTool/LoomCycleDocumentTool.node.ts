@@ -56,7 +56,10 @@ const DocumentInputSchema = z.object({
 		.optional()
 		.describe('Document id (get_document, export_md) or chunk id (get_chunk, update_chunk, add_tags, backlinks, related)'),
 	path: z.string().optional().describe('Path-tree name, e.g. /docs/launch. Alternative to id on get_document; names a new document on create_document.'),
-	document_id: z.string().optional().describe('Document the chunk belongs to. Required for create_chunk.'),
+	document_id: z
+		.string()
+		.optional()
+		.describe('Document the chunk belongs to, as a document ID (hex) — NOT a path. Required for create_chunk. If you only have a path, call op=get_document with it first and use the document_id it returns.'),
 	parent_id: z.string().optional().describe('Parent chunk for create_chunk. Omit to attach to the document root.'),
 	title: z.string().optional().describe('Title for a new document or chunk. What graph recall and [[name]] links match against.'),
 	body: z
@@ -178,6 +181,7 @@ async function runDocumentOp(
 	if (args.op === 'create_chunk' && !args.document_id) {
 		throw new Error('document_id is required for create_chunk');
 	}
+	assertNotAPath(args.document_id, 'document_id');
 	if (args.op === 'update_chunk' && !args.id) {
 		throw new Error('id is required for update_chunk');
 	}
@@ -211,4 +215,21 @@ async function runDocumentOp(
 	}
 
 	return client.document(input);
+}
+
+/**
+ * Reject a Path where a document ID is expected.
+ *
+ * The substrate takes `document_id` verbatim and does not check the document
+ * exists, so a path produces an ORPHAN chunk: stored, reported as success, and
+ * invisible to the UI and to `query_chunks` forever after. A model is MORE
+ * likely to hit this than a human — told "the document is at /documents/news",
+ * it will pass exactly that. The thrown message becomes the tool result, so the
+ * model can read it and retry with get_document.
+ */
+function assertNotAPath(value: string | undefined, field: string): void {
+	if (!value || !value.startsWith('/')) return;
+	throw new Error(
+		`${field} looks like a Path ("${value}") but must be a document ID. Call op=get_document with path="${value}" first and use the document_id it returns.`,
+	);
 }
