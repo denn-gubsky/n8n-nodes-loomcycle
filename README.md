@@ -40,7 +40,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Thirty-seven nodes (26 action + 3 trigger + 8 cluster sub-nodes) plus one credential type.
+Thirty-nine nodes (27 action + 4 trigger + 8 cluster sub-nodes) plus one credential type.
 
 ### Credential
 
@@ -65,7 +65,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle LLM** — `Chat` / `Embeddings` — direct calls to loomcycle's LLM gateway (`POST /v1/_llm/*`) as a workflow step: provider routing + auth + retry handled substrate-side, no agent loop. For RAG / embedding pipelines. (Distinct from the **Chat Model** sub-node, which feeds an AI Agent.)
 - **LoomCycle Memory Backend** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — versioned memory-backend definitions (in-process or external REST store + ranker) that agents' Memory tool dispatches to (RFC I; requires loomcycle ≥ v0.15).
 - **LoomCycle Operator Token** — `Get` / `List` / `Retire` — operator-token lifecycle (RFC L; requires loomcycle ≥ v0.17). **Mint + rotate are intentionally NOT here** — those return the token secret, which must not enter n8n execution data; do them via the loomcycle Web UI / CLI.
-- **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
+- **LoomCycle Snapshot** — `Create` / `List` / `Get` / `Restore` / `Delete` / `Export URL` / `Pause Runtime` / `Resume Runtime` / `Get Runtime State` / `Resolve Probe` — runtime snapshot backup + restore (loomcycle ≥ v0.8.17): snapshot before a deploy, restore on rollback. Restore accepts a stored snapshot ID or an inline envelope; Export URL returns a bearer-authed download link.
 - **LoomCycle Volume** — `Create` / `Get` / `List` / `List Ephemeral` / `Delete` / `Purge` — filesystem Volumes (RFC AH; requires loomcycle ≥ v1.1). Provision named ro/rw filesystem roots for agents (the runtime derives the on-disk path); since v1.1 a Volume is the only way an agent gets filesystem access. `Delete` unmaps but keeps the files; `Purge` removes the tree.
 - **LoomCycle Path** — `Resolve` / `List` / `Stat` / `Make Directory` / `Move` / `Remove` — the Path VFS (RFC AL; requires loomcycle ≥ v1.4): a Unix-like filesystem naming Memory entries / Volume mounts / Documents by human-readable path (e.g. `/docs/launch`). Scope (agent / user / tenant) resolves server-side from the bearer.
 - **LoomCycle Document** — 36 ops over the chunked-graph Document store (RFC AK + BS / BO / CE; requires loomcycle ≥ v1.4 **and SQL Memory**). Document + chunk lifecycle, edges and discovery, tags, types, `Query Chunks` (structured filters, `Under Path`, or a validator-gated read-only SQL escape hatch), per-chunk `History` / `Get Version` / `Diff Revisions`, Markdown and **JSON Canvas** import-export, image assets, and peer federation.
@@ -76,6 +76,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires ≥ v1.45, **and `LOOMCYCLE_AUDIT_LOG_PATH` set** from v1.55). The natural home for a **GDPR data-subject-request workflow**. `Execute` is a **dry run unless you commit**, and committing requires retyping the subject. **Persist the output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
 - **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated tokens (RFC BX P2; ≥ v1.50). Reads plus one revocation by design: identity CRUD is operator work for the CLI / Web UI, while `Revoke Token` stays because cutting off a leaked credential is worth automating on an alert. Minting is absent — the bearer plaintext must not reach execution data.
 - **LoomCycle Usage** — `Usage Report` / `List Limits` / `Get Config` — cost attribution (RFC AV; ≥ v1.10) and a read of per-scope budgets (RFC AW; ≥ v1.11). Group by `source` to see **which key actually paid**. Read-only: budget writes stay operator-only, and `setLimit` is a full-row upsert whose omitted tier clears that ceiling.
+- **LoomCycle History** — `List` / `Get` / `Search` / `Related` / `Rename` / `Annotate` / `Pin` / `Archive` / `Recap` / `Resume` — past chats as first-class objects (RFC BE; ≥ v1.20). `Get` renders a transcript as structured events, full Markdown, or **Conversation** (turns only) — use the last when feeding a chat to a model. ⚠️ **`Search` matches the chat TITLE only**; **`Related`** is the semantic path.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -84,6 +85,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle: Run Completed** — fires when an agent run reaches a terminal state. SSE primary with polling fallback for proxy-hostile deployments. Honours `parentAgentId` + `debug` filters from the adapter.
 - **LoomCycle: Channel Message** — long-poll subscribe with two delivery modes: `auto-ack` (at-most-once) and `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
 - **LoomCycle: Interrupt Pending** — poll-based: fires on new **pending interruptions** (agent questions) for a user, deduping by `interrupt_id`. Wire the output to a human channel (Slack / email / form) and feed the answer back via **LoomCycle Interruption → Resolve**.
+- **LoomCycle: Change Event** — the one genuinely **event-driven** trigger (RFC CD Part C; ≥ v1.54 plus `LOOMCYCLE_MEMORY_CHANGES_ENABLED=1`). loomcycle POSTs HMAC-signed batches on every memory / document write, so no polling. Events are **value-free** — the coordinate of what changed, not the value — so follow it with Memory → Get Entry or Document → Get Chunk. Signature verification **fails closed**; delivery is at-least-once, so the node dedupes on `seq`. Subscriptions are operator-yaml only.
 
 ### Cluster sub-nodes (plug into n8n's AI Agent)
 
