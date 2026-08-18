@@ -11,7 +11,6 @@ import type {
 	HookPhase,
 	InterruptStatus,
 	CreateSnapshotOptions,
-	CreateUserBody,
 	DocumentToolInput,
 	LLMChatMessage,
 	LLMChatOptions,
@@ -23,10 +22,8 @@ import type {
 	RunBatchOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
-	SetTokenLimitRequest,
 	SubstrateToolInput,
 	UpdateChannelOptions,
-	UpdateUserBody,
 	UsageDimension,
 	VolumeMode,
 } from '@loomcycle/client';
@@ -1929,10 +1926,12 @@ async function executeErasure(
  *
  * The tenant is always server-derived, so no call here takes one.
  *
- * `mintUserToken` is deliberately unreachable: the substrate returns the bearer
- * plaintext exactly once, and surfacing it would persist a live credential into
- * n8n execution data (CLAUDE.md §security.6). It is absent from the op list AND
- * refused here, the same defence-in-depth the Operator Token node uses.
+ * Scoped to reads plus one revocation. `mintUserToken` is unreachable because the
+ * substrate returns the bearer plaintext exactly once and it would land in n8n
+ * execution data (CLAUDE.md §security.6); identity CRUD is unreachable because
+ * provisioning users is operator work, not a workflow side effect. Both are
+ * absent from the op list AND refused here — the same defence-in-depth the
+ * Operator Token node uses.
  */
 async function executeUser(
 	ctx: IExecuteFunctions,
@@ -1940,10 +1939,20 @@ async function executeUser(
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
+	// Refused defensively, not merely omitted from the op list. Minting returns
+	// the bearer plaintext once, so it must never be reachable; identity CRUD is
+	// operator work that belongs in the CLI / Web UI rather than in a workflow.
 	if (operation === 'mint' || operation === 'mintToken' || operation === 'rotate') {
 		throw new NodeOperationError(
 			ctx.getNode(),
 			'Minting a delegated token is not available from n8n: the substrate returns the bearer plaintext once, and it would be persisted into execution data. Mint it via the loomcycle CLI or Web UI.',
+			{ itemIndex: i },
+		);
+	}
+	if (operation === 'create' || operation === 'update' || operation === 'delete') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`User ${operation} is not available from n8n — provisioning and removing users is operator work. Do it via the loomcycle CLI or Web UI. (To remove a subject's DATA rather than its identity row, use the LoomCycle Erasure node.)`,
 			{ itemIndex: i },
 		);
 	}
@@ -1954,41 +1963,6 @@ async function executeUser(
 	}
 
 	const subject = ctx.getNodeParameter('subject', i) as string;
-
-	if (operation === 'create') {
-		const body: CreateUserBody = { subject };
-		const displayName = (ctx.getNodeParameter('displayName', i, '') as string).trim();
-		if (displayName) body.display_name = displayName;
-		body.access_mode = ctx.getNodeParameter('accessMode', i, 'tenant') as string;
-		body.status = ctx.getNodeParameter('status', i, 'active') as string;
-		const resp = await client.createUser(body);
-		return resp as unknown as IDataObject;
-	}
-
-	if (operation === 'update') {
-		// A PATCH: an omitted key leaves the column unchanged, so a blank display
-		// name must not be sent as "" — that would clear it.
-		const body: UpdateUserBody = {};
-		const displayName = (ctx.getNodeParameter('displayName', i, '') as string).trim();
-		if (displayName) body.display_name = displayName;
-		const accessMode = ctx.getNodeParameter('accessMode', i, '') as string;
-		if (accessMode) body.access_mode = accessMode;
-		const status = ctx.getNodeParameter('status', i, '') as string;
-		if (status) body.status = status;
-		const resp = await client.updateUser(subject, body);
-		return resp as unknown as IDataObject;
-	}
-
-	if (operation === 'delete') {
-		await client.deleteUser(subject);
-		// 204 on the wire; surface a consistent envelope for n8n. Worth stating
-		// that data survives — this deletes an identity, not a footprint.
-		return {
-			ok: true,
-			subject,
-			note: 'Identity row deleted and its delegated tokens retired. Owned data (runs, sessions, memory) is untouched — use the Erasure node for that.',
-		} as IDataObject;
-	}
 
 	if (operation === 'listTokens') {
 		const resp = await client.listUserTokens(subject);
@@ -2006,7 +1980,7 @@ async function executeUser(
 
 /**
  * Usage attribution (RFC AV) + token budgets (RFC AW) + the instance capability
- * report. The FinOps surface.
+ * report. The FinOps surface, READ-ONLY: budget writes are operator work.
  */
 async function executeUsage(
 	ctx: IExecuteFunctions,
@@ -2040,33 +2014,16 @@ async function executeUsage(
 		return resp as unknown as IDataObject;
 	}
 
-	if (operation === 'setLimit') {
-		// FULL-ROW UPSERT: an omitted tier is CLEARED to unlimited, not left
-		// alone. 0 in the UI therefore means "unlimited on this axis", which is
-		// why it is omitted from the body rather than sent as 0.
-		const body: SetTokenLimitRequest = {
-			scope: ctx.getNodeParameter('limitScope', i, 'tenant') as string,
-		};
-		const scopeId = (ctx.getNodeParameter('limitScopeId', i, '') as string).trim();
-		if (scopeId) body.scope_id = scopeId;
-		const softLimit = ctx.getNodeParameter('softLimit', i, 0) as number;
-		if (softLimit > 0) body.soft_limit = softLimit;
-		const hardLimit = ctx.getNodeParameter('hardLimit', i, 0) as number;
-		if (hardLimit > 0) body.hard_limit = hardLimit;
-		if (tenant) body.tenant_id = tenant;
-		const resp = await client.setLimit(body);
-		return resp as unknown as IDataObject;
-	}
-
-	if (operation === 'deleteLimit') {
-		const scope = ctx.getNodeParameter('limitScope', i, 'tenant') as string;
-		const scopeId = (ctx.getNodeParameter('limitScopeId', i, '') as string).trim();
-		const opts: { scopeId?: string; tenant?: string } = {};
-		if (scopeId) opts.scopeId = scopeId;
-		if (tenant) opts.tenant = tenant;
-		await client.deleteLimit(scope, Object.keys(opts).length > 0 ? opts : undefined);
-		// void on the wire; surface a consistent envelope.
-		return { ok: true, scope, scope_id: scopeId || undefined } as IDataObject;
+	// Budget WRITES are deliberately unreachable: they stay operator-only even for
+	// a tenant member (RFC CB), and setLimit is a full-row upsert whose omitted
+	// tier CLEARS that ceiling — too easy to do damage with from a half-filled
+	// form. Refused rather than merely omitted from the op list.
+	if (operation === 'setLimit' || operation === 'deleteLimit') {
+		throw new NodeOperationError(
+			ctx.getNode(),
+			`Usage ${operation} is not available from n8n — setting token budgets is an operator act, and setLimit is a full-row upsert that would clear any tier left blank. Manage budgets via the loomcycle CLI or Web UI.`,
+			{ itemIndex: i },
+		);
 	}
 
 	throw new NodeOperationError(ctx.getNode(), `Unknown usage operation: ${operation}`);

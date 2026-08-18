@@ -33,7 +33,7 @@ import { LoomCycleDirectory } from '../../../nodes/LoomCycleDirectory/LoomCycleD
 import { LoomCycleErasure } from '../../../nodes/LoomCycleErasure/LoomCycleErasure.node';
 import { LoomCycleUser } from '../../../nodes/LoomCycleUser/LoomCycleUser.node';
 import { LoomCycleUsage } from '../../../nodes/LoomCycleUsage/LoomCycleUsage.node';
-import { userOps } from '../../../nodes/LoomCycle/descriptions';
+import { usageOps, userOps } from '../../../nodes/LoomCycle/descriptions';
 import { makeExecuteContext } from './_helpers';
 
 beforeEach(() => {
@@ -183,63 +183,6 @@ describe('LoomCycle resource=user', () => {
 		expect(mockClient.listUsers).toHaveBeenCalledWith();
 	});
 
-	it('Create sends subject, access mode and status', async () => {
-		mockClient.createUser.mockResolvedValue({ subject: 'u1', access_mode: 'isolated' });
-		const node = new LoomCycleUser();
-		const ctx = makeExecuteContext({
-			params: {
-				resource: 'user',
-				operation: 'create',
-				subject: 'u1',
-				displayName: 'Alice',
-				accessMode: 'isolated',
-				status: 'active',
-			},
-		});
-		await node.execute.call(ctx);
-		expect(mockClient.createUser).toHaveBeenCalledWith({
-			subject: 'u1',
-			display_name: 'Alice',
-			access_mode: 'isolated',
-			status: 'active',
-		});
-	});
-
-	// Update is a PATCH: an omitted key leaves the column unchanged, so a blank
-	// display name must not be sent as "" — that would clear it.
-	it('Update omits a blank display name instead of clearing it', async () => {
-		mockClient.updateUser.mockResolvedValue({ subject: 'u1' });
-		const node = new LoomCycleUser();
-		const ctx = makeExecuteContext({
-			params: {
-				resource: 'user',
-				operation: 'update',
-				subject: 'u1',
-				displayName: '   ',
-				accessMode: 'tenant',
-				status: 'disabled',
-			},
-		});
-		await node.execute.call(ctx);
-		expect(mockClient.updateUser).toHaveBeenCalledWith('u1', {
-			access_mode: 'tenant',
-			status: 'disabled',
-		});
-	});
-
-	it('Delete surfaces an envelope that says owned data survives', async () => {
-		mockClient.deleteUser.mockResolvedValue(undefined);
-		const node = new LoomCycleUser();
-		const ctx = makeExecuteContext({
-			params: { resource: 'user', operation: 'delete', subject: 'u1' },
-		});
-		const result = await node.execute.call(ctx);
-		const json = result[0][0].json as Record<string, unknown>;
-		expect(mockClient.deleteUser).toHaveBeenCalledWith('u1');
-		expect(json.ok).toBe(true);
-		expect(String(json.note)).toContain('Erasure');
-	});
-
 	it('List Tokens returns metadata only', async () => {
 		mockClient.listUserTokens.mockResolvedValue({ subject: 'u1', tokens: [{ def_id: 'd1', active: true }] });
 		const node = new LoomCycleUser();
@@ -262,15 +205,12 @@ describe('LoomCycle resource=user', () => {
 		expect(mockClient.revokeUserToken).toHaveBeenCalledWith('u1', 'd1');
 	});
 
-	// SECURITY: mintUserToken returns the bearer plaintext once. It must be
-	// absent from the op list AND refused by the executor — the same
-	// defence-in-depth the Operator Token node uses.
-	it('does not offer a mint operation', () => {
+	// The node is scoped to reads plus one revocation. Minting is excluded because
+	// it returns the bearer plaintext; identity CRUD is excluded because
+	// provisioning users is operator work, not a workflow side effect.
+	it('offers only reads plus Revoke Token', () => {
 		const opParam = userOps[0] as { options: Array<{ value: string }> };
-		const values = opParam.options.map((o) => o.value);
-		expect(values).not.toContain('mint');
-		expect(values).not.toContain('mintToken');
-		expect(values).not.toContain('rotate');
+		expect(opParam.options.map((o) => o.value).sort()).toEqual(['list', 'listTokens', 'revokeToken']);
 	});
 
 	it('refuses a mint operation even if one is forced through', async () => {
@@ -280,6 +220,17 @@ describe('LoomCycle resource=user', () => {
 			await expect(node.execute.call(ctx)).rejects.toThrow(/not available from n8n/);
 		}
 		expect(mockClient.mintUserToken).not.toHaveBeenCalled();
+	});
+
+	it('refuses identity CRUD even if forced through, and points at Erasure for data', async () => {
+		const node = new LoomCycleUser();
+		for (const operation of ['create', 'update', 'delete']) {
+			const ctx = makeExecuteContext({ params: { resource: 'user', operation, subject: 'u1' } });
+			await expect(node.execute.call(ctx)).rejects.toThrow(/operator work/);
+		}
+		expect(mockClient.createUser).not.toHaveBeenCalled();
+		expect(mockClient.updateUser).not.toHaveBeenCalled();
+		expect(mockClient.deleteUser).not.toHaveBeenCalled();
 	});
 });
 
@@ -322,60 +273,26 @@ describe('LoomCycle resource=usage', () => {
 		expect(mockClient.listLimits).toHaveBeenCalledWith(undefined);
 	});
 
-	// Set Limit is a FULL-ROW UPSERT: an omitted tier is CLEARED to unlimited.
-	// So 0 in the UI means "unlimited on this axis" and must not be sent as 0,
-	// which the substrate would read as a zero ceiling refusing every run.
-	it('Set Limit omits a tier left at zero rather than sending a zero ceiling', async () => {
-		mockClient.setLimit.mockResolvedValue({ scope: 'tenant' });
-		const node = new LoomCycleUsage();
-		const ctx = makeExecuteContext({
-			params: {
-				resource: 'usage',
-				operation: 'setLimit',
-				limitScope: 'tenant',
-				softLimit: 900000,
-				hardLimit: 0,
-			},
-		});
-		await node.execute.call(ctx);
-		const body = mockClient.setLimit.mock.calls[0][0];
-		expect(body).toEqual({ scope: 'tenant', soft_limit: 900000 });
-		expect(body).not.toHaveProperty('hard_limit');
+	// Budget writes are operator-only (RFC CB) and setLimit is a full-row upsert
+	// whose omitted tier CLEARS that ceiling — far too easy to damage from a
+	// half-filled form. Excluded from the op list and refused by the executor.
+	it('offers only read operations', () => {
+		const opParam = usageOps[0] as { options: Array<{ value: string }> };
+		expect(opParam.options.map((o) => o.value).sort()).toEqual([
+			'getConfig',
+			'listLimits',
+			'usageReport',
+		]);
 	});
 
-	it('Set Limit forwards scope_id and tenant_id for a per-user budget', async () => {
-		mockClient.setLimit.mockResolvedValue({ scope: 'user' });
+	it('refuses budget writes even if forced through', async () => {
 		const node = new LoomCycleUsage();
-		const ctx = makeExecuteContext({
-			params: {
-				resource: 'usage',
-				operation: 'setLimit',
-				limitScope: 'user',
-				limitScopeId: 'u1',
-				softLimit: 1000,
-				hardLimit: 2000,
-				tenant: 'acme',
-			},
-		});
-		await node.execute.call(ctx);
-		expect(mockClient.setLimit).toHaveBeenCalledWith({
-			scope: 'user',
-			scope_id: 'u1',
-			soft_limit: 1000,
-			hard_limit: 2000,
-			tenant_id: 'acme',
-		});
-	});
-
-	it('Delete Limit surfaces an ok envelope for a void response', async () => {
-		mockClient.deleteLimit.mockResolvedValue(undefined);
-		const node = new LoomCycleUsage();
-		const ctx = makeExecuteContext({
-			params: { resource: 'usage', operation: 'deleteLimit', limitScope: 'user', limitScopeId: 'u1' },
-		});
-		const result = await node.execute.call(ctx);
-		expect(mockClient.deleteLimit).toHaveBeenCalledWith('user', { scopeId: 'u1' });
-		expect(result[0][0].json).toMatchObject({ ok: true, scope: 'user', scope_id: 'u1' });
+		for (const operation of ['setLimit', 'deleteLimit']) {
+			const ctx = makeExecuteContext({ params: { resource: 'usage', operation } });
+			await expect(node.execute.call(ctx)).rejects.toThrow(/operator act/);
+		}
+		expect(mockClient.setLimit).not.toHaveBeenCalled();
+		expect(mockClient.deleteLimit).not.toHaveBeenCalled();
 	});
 
 	it('Get Config takes no arguments', async () => {
