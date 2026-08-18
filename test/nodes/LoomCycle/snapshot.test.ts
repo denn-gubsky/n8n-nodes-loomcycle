@@ -9,6 +9,10 @@ const { mockClient } = vi.hoisted(() => ({
 		restoreSnapshot: vi.fn(),
 		exportSnapshotURL: vi.fn(),
 		health: vi.fn(),
+		pauseRuntime: vi.fn(),
+		resumeRuntime: vi.fn(),
+		getRuntimeState: vi.fn(),
+		resolveProbe: vi.fn(),
 	},
 }));
 
@@ -129,5 +133,39 @@ describe('LoomCycle resource=snapshot', () => {
 		expect(arg.json).toEqual({ id: 'snap_x', schema_version: 1 });
 		expect(arg.snapshotId).toBeUndefined();
 		expect(arg.includeHistory).toBe(false);
+	});
+
+	// Runtime maintenance, grouped on this node because these are the calls made
+	// AROUND a snapshot: pause, capture, deploy/restore, resume. None takes an
+	// argument, so the assertion is that nothing is invented.
+	describe('Runtime maintenance', () => {
+		it('Pause / Resume / Get State / Resolve Probe each call with no arguments', async () => {
+			const cases: Array<[string, keyof typeof mockClient]> = [
+				['pauseRuntime', 'pauseRuntime'],
+				['resumeRuntime', 'resumeRuntime'],
+				['getRuntimeState', 'getRuntimeState'],
+				['resolveProbe', 'resolveProbe'],
+			];
+			for (const [operation, method] of cases) {
+				(mockClient[method] as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+				const node = new LoomCycle();
+				const ctx = makeExecuteContext({ params: { resource: 'snapshot', operation } });
+				const result = await node.execute.call(ctx);
+				expect(mockClient[method]).toHaveBeenCalledWith();
+				expect(result[0][0].json).toMatchObject({ ok: true });
+			}
+		});
+
+		it('Get Runtime State surfaces what is still in flight', async () => {
+			mockClient.getRuntimeState.mockResolvedValue({ paused: true, running: 2 });
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'snapshot', operation: 'getRuntimeState' },
+			});
+			const result = await node.execute.call(ctx);
+			// Pausing does not stop in-flight runs, so this is the field that tells
+			// an operator whether it is actually safe to capture yet.
+			expect(result[0][0].json).toMatchObject({ paused: true, running: 2 });
+		});
 	});
 });

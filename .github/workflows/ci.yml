@@ -4,9 +4,13 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, full-edition]
+  # Both long-lived branches, so a full-edition PR is gated too. Without
+  # `full-edition` here a mirror PR ran GitGuardian only — no build, no
+  # conformance — which left them sitting unmerged behind an absent green check
+  # and the mirrors stacking on each other.
   pull_request:
-    branches: [main]
+    branches: [main, full-edition]
 
 jobs:
   build:
@@ -31,9 +35,15 @@ jobs:
   # n8n's official community-node conformance linter — the gate n8n runs when
   # vetting a verification submission. Keeping it green here keeps the package
   # submission-ready on every push.
+  #
+  # SLIM ONLY. The full edition deliberately uses @langchain/core and timer
+  # primitives, both of which this linter bans, so running it there would fail by
+  # design and paint every full-edition PR red. Gated on the branch rather than
+  # dropped, because slim must stay submission-ready.
   conformance:
     name: n8n-node lint (verification conformance)
     runs-on: ubuntu-latest
+    if: github.base_ref == 'main' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v5
       - name: Setup Node 22

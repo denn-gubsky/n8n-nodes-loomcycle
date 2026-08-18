@@ -1,10 +1,10 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle-full",
-	"version": "2.16.0",
+	"version": "2.17.0",
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "FULL self-hosted edition of the loomcycle n8n nodes — superset of @loomcycle/n8n-nodes-loomcycle. Adds the langchain-based AI-Agent Tool sub-nodes (Memory / Channel / Sub-Agent / MCP Server / Document / Fact / Team Tool), SSE-push triggers, and the Run 'Wait for Completion' op that n8n Cloud verification disallows. 37 nodes total. NOT n8n-Cloud-verified — install manually on self-hosted n8n. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials ≥ v0.12.x; Webhook + A2A ≥ v0.14.x; interactive run steering ≥ v1.1.1; Volume ≥ v1.1; Path + Document ≥ v1.4; image input ≥ v1.7; turn-scoped cancel + interrupt decline ≥ v1.22; session replay ≥ v1.25; unified memory search ≥ v1.47; Fact + Document Source ≥ v1.54; Team ≥ v1.17.1; Usage ≥ v1.10, Erasure ≥ v1.45, Directory ≥ v1.46, User ≥ v1.50. Document / Fact need SQL Memory on the sidecar).",
+	"description": "FULL self-hosted edition of the loomcycle n8n nodes — superset of @loomcycle/n8n-nodes-loomcycle. Adds the langchain-based AI-Agent Tool sub-nodes (Memory / Channel / Sub-Agent / MCP Server / Document / Fact / Team Tool), SSE-push triggers, and the Run 'Wait for Completion' op that n8n Cloud verification disallows. 39 nodes total. NOT n8n-Cloud-verified — install manually on self-hosted n8n. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials ≥ v0.12.x; Webhook + A2A ≥ v0.14.x; interactive run steering ≥ v1.1.1; Volume ≥ v1.1; Path + Document ≥ v1.4; image input ≥ v1.7; turn-scoped cancel + interrupt decline ≥ v1.22; session replay ≥ v1.25; unified memory search ≥ v1.47; Fact + Document Source ≥ v1.54; Team ≥ v1.17.1; Usage ≥ v1.10, Erasure ≥ v1.45, Directory ≥ v1.46, User ≥ v1.50; History ≥ v1.20; the Change Event trigger ≥ v1.54. Document / Fact need SQL Memory on the sidecar).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -78,9 +78,11 @@
 			"dist/nodes/LoomCycleErasure/LoomCycleErasure.node.js",
 			"dist/nodes/LoomCycleUser/LoomCycleUser.node.js",
 			"dist/nodes/LoomCycleUsage/LoomCycleUsage.node.js",
+			"dist/nodes/LoomCycleHistory/LoomCycleHistory.node.js",
 			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
 			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js",
 			"dist/nodes/LoomCycleInterruptPending/LoomCycleInterruptPending.node.js",
+			"dist/nodes/LoomCycleChangeEvent/LoomCycleChangeEvent.node.js",
 			"dist/nodes/LoomCycleChatModel/LoomCycleChatModel.node.js",
 			"dist/nodes/LoomCycleMemoryTool/LoomCycleMemoryTool.node.js",
 			"dist/nodes/LoomCycleChannelTool/LoomCycleChannelTool.node.js",
