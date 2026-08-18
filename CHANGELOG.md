@@ -2,6 +2,31 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] — 2026-08-18
+
+**Minor release (full edition).** Mirrors slim-edition **3.15.0** — the governance and multi-tenancy surface. **33 → 37 nodes.**
+
+### Added — mirrored from slim 3.15.0
+
+- **LoomCycle Directory** (3 ops, ≥ v1.46) — read-only `List Users` / `Inspect Subject` / `List Tenants`.
+- **LoomCycle Erasure** (2 ops, RFC BL P5, ≥ v1.45) — `Report` and `Execute`, the latter a dry run unless explicitly committed with a retyped subject.
+- **LoomCycle User** (3 ops, RFC BX P2, ≥ v1.50) — `List` / `List Tokens` / `Revoke Token`.
+- **LoomCycle Usage** (3 ops, RFC AV / AW, ≥ v1.10 / v1.11) — `Usage Report` / `List Limits` / `Get Config`.
+
+### Scope, carried over from slim
+
+Budget writes (`Set Limit` / `Delete Limit`) and user identity CRUD (`Create` / `Update` / `Delete`) are deliberately **not** exposed: both are operator work for the loomcycle CLI / Web UI rather than a workflow side effect. `setLimit` illustrates why — it is a full-row upsert, so a tier left blank in an n8n form is *cleared to unlimited*, while a literal `0` would be a zero ceiling refusing every run. Neither is what a half-filled form intends. Both families are excluded from their op lists **and** refused in the executor, with tests asserting the op lists exactly.
+
+`Revoke Token` is the one write kept: cutting off a leaked credential is exactly what you want to automate on an alert, and it cannot silently clear anything.
+
+### No Tool sub-node for this phase
+
+Unlike Phases 2 and 3, nothing here gets an AI-Agent Tool. Erasure is irreversible, Directory and Usage expose cross-subject information, and User touches credentials — none of it is work to hand a model on the strength of a prompt. The governance surface stays operator-facing on purpose.
+
+### Preserved — full-edition divergences
+
+`Run → Wait for Completion` + `sleep()` re-applied after the mirror, the eight langchain cluster sub-nodes, the langchain Chat Model, and the SSE / long-poll triggers. Re-verified `@n8n/ai-node-sdk` has no source imports.
+
 ## [2.15.0] — 2026-08-17
 
 **Minor release (full edition).** Mirrors slim-edition **3.14.0** (Agent Teams, RFC AP) and adds the **Team Tool** cluster sub-node. **31 → 33 nodes.**

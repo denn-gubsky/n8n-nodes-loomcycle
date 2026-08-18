@@ -40,7 +40,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Thirty-three nodes (22 action + 3 trigger + 8 cluster sub-nodes) plus one credential type.
+Thirty-seven nodes (26 action + 3 trigger + 8 cluster sub-nodes) plus one credential type.
 
 ### Credential
 
@@ -72,6 +72,10 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Fact** — 10 ops over the RFC CC verified-writes tier (loomcycle ≥ v1.54). A fact stores the exact **source span** it came from and a write-time judge checks the claim against it; a failing fact is **withheld, not deleted**. Bi-temporal throughout: **Valid At** / **Invalid At** record when a fact was true in the world, and **As Of** answers as of a past instant.
 - **LoomCycle Document Source** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register a peer loomcycle instance as a document source (RFC CE; ≥ v1.54). Operator-admin only; the overlay carries `api_key_env`, a name rather than a secret.
 - **LoomCycle Team** — `List` / `Get` / `Create` / `Fork` / `Delete` / `Run` / `Render Diagram` — **Agent Teams** (RFC AP; requires loomcycle ≥ v1.17.1). A versioned **state-machine graph** of agent roles: states carry a handler (`agent` / `parallel` / `consolidator` / `terminal`), transitions are gated on each state's outcome. `Run` walks the graph by name (active version) or `def_id`, and bound to a **Document chunk task board** it persists `chunk.status` per transition so progress is durable and a later Run **resumes**. `Render Diagram` emits Mermaid `stateDiagram-v2`.
+- **LoomCycle Directory** — `List Users` / `Inspect Subject` / `List Tenants` — read-only "who is in this deployment and what is held for them" (loomcycle ≥ v1.46). `Inspect` aggregates one subject's activity, chats, memory, documents, budget and usage in one call. There is no create or update: a user here is **derived from run activity**, not stored. `List Tenants` needs an operator-admin token and refuses a tenant-scoped one outright.
+- **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires ≥ v1.45, **and `LOOMCYCLE_AUDIT_LOG_PATH` set** from v1.55). The natural home for a **GDPR data-subject-request workflow**. `Execute` is a **dry run unless you commit**, and committing requires retyping the subject. **Persist the output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
+- **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated tokens (RFC BX P2; ≥ v1.50). Reads plus one revocation by design: identity CRUD is operator work for the CLI / Web UI, while `Revoke Token` stays because cutting off a leaked credential is worth automating on an alert. Minting is absent — the bearer plaintext must not reach execution data.
+- **LoomCycle Usage** — `Usage Report` / `List Limits` / `Get Config` — cost attribution (RFC AV; ≥ v1.10) and a read of per-scope budgets (RFC AW; ≥ v1.11). Group by `source` to see **which key actually paid**. Read-only: budget writes stay operator-only, and `setLimit` is a full-row upsert whose omitted tier clears that ceiling.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -229,6 +233,11 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
 | Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
 | **Agent Teams** (RFC AP) — Team node + Team Tool | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
+| Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
+| Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits |
+| **Subject erasure** (RFC BL P5) — Erasure node | **v1.45** | also needs `LOOMCYCLE_AUDIT_LOG_PATH` from v1.55 |
+| Directory (derived users / tenants) | **v1.46** | Directory node; List Tenants is admin-only |
+| **Delegated users + tokens** (RFC BX) — User node | **v1.50** | needs a persistent store (503 otherwise) |
 | **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node + Document Tool — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
 | Document image assets (RFC BO) | **v1.30** | Document → Set Asset / Get Asset |
 | Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |

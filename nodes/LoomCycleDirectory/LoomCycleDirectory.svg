@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+  <title>LoomCycle Directory</title>
+  <rect x="2.75" y="2.75" width="54.5" height="54.5" rx="12" fill="#FAF8F3" stroke="#56C596" stroke-width="1.5"/>
+  <g fill="none" stroke="#56C596" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="22" cy="21" r="5"/>
+    <path d="M14 40 c0-4.5 3.5-8 8-8 s8 3.5 8 8"/>
+    <path d="M36 20 H46"/>
+    <path d="M36 28 H46"/>
+    <path d="M36 36 H43"/>
+  </g>
+</svg>
