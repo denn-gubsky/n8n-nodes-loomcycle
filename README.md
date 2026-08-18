@@ -61,7 +61,7 @@ The package lives under the [`@loomcycle`](https://www.npmjs.com/org/loomcycle) 
 
 ## What's in the box
 
-Twenty-six nodes (22 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
+Thirty nodes (26 action + 3 trigger + 1 AI-Agent cluster sub-node) plus one credential type. **Zero runtime dependencies** — n8n-Cloud-verification-ready.
 
 ### Credential
 
@@ -93,6 +93,10 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Fact** — 10 ops over the RFC CC verified-writes tier (loomcycle ≥ v1.54): `Remember` / `Upsert Fact` / `Supersede Fact` / `List Facts` / `Judge Fact` / `Verbatim Answer` / `Verification Stats` / `Graph Recall` / `Propose Entity` / `Search`. A fact stores the exact **source span** it was drawn from and a write-time judge checks the claim against it; a fact that fails is **withheld, not deleted** (pass *Include Refuted* to audit it). `judged_at` / `judged_by` are server-stamped with no wire field, so a caller cannot record a machine verdict as an operator one. Corrections go through `Supersede Fact` — `Remember` is additive only, there is no forget.
 - **LoomCycle Document Source** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register a peer loomcycle instance as a document source (RFC CE; requires loomcycle ≥ v1.54), which the Document node's `Set Remote` / `Sync` ops consume. Operator-admin only; the overlay carries `api_key_env`, the env-var **name** of the peer bearer, never a plaintext token.
 - **LoomCycle Team** — `List` / `Get` / `Create` / `Fork` / `Delete` / `Run` / `Render Diagram` — **Agent Teams** (RFC AP; requires loomcycle ≥ v1.17.1). A TeamDef is a versioned **state-machine graph** of agent roles: states carry a handler (`agent` / `parallel` / `consolidator` / `terminal`) and transitions are gated on each state's outcome. `Run` walks the graph, spawning an agent per state until a terminal — and bound to a **Document chunk task board** it persists `chunk.status` per transition, so progress is durable and a later Run **resumes** rather than restarting. `Render Diagram` emits Mermaid `stateDiagram-v2`, optionally highlighting the state a walk has reached. This is the closest analogue loomcycle has to an n8n workflow: n8n designs and triggers it, the substrate runs it under its own admission control.
+- **LoomCycle Directory** — `List Users` / `Inspect Subject` / `List Tenants` — read-only "who is in this deployment and what is held for them" (loomcycle ≥ v1.46). `Inspect` aggregates one subject's activity, chats, memory, documents, budget and usage in a single call. There is no create or update: a user here is **derived from run activity**, not stored. `List Tenants` needs an operator-admin token and refuses a tenant-scoped one outright rather than filtering.
+- **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires loomcycle ≥ v1.45, **and the deployment must set `LOOMCYCLE_AUDIT_LOG_PATH`** from v1.55). The natural home for a **GDPR data-subject-request workflow**. Three tiers: deletable, subject-keyed-but-uncovered, and residue — facts about the subject in scopes they do not own. `Execute` is a **dry run unless you commit**, and committing additionally requires retyping the subject. **Persist the Execute output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
+- **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated bearer tokens (RFC BX P2; requires ≥ v1.50). The tenant is always server-derived, so no operation takes one. **Reads plus one revocation, by design.** Identity CRUD is absent because provisioning and removing users is operator work for the loomcycle CLI / Web UI, not a workflow side effect; `Revoke Token` stays because cutting off a leaked credential is exactly what you want to automate on an alert. **Minting is absent for a stronger reason** — the substrate returns the bearer plaintext once, and it must not land in execution data.
+- **LoomCycle Usage** — `Usage Report` / `List Limits` / `Get Config` — token + cost attribution (RFC AV; ≥ v1.10) and a read of the per-scope token budgets (RFC AW; ≥ v1.11). Group a report by `source` to see **which key actually paid** — operator vs tenant. **Read-only by design:** budget writes stay operator-only even for a tenant member, and `setLimit` is a full-row upsert whose omitted tier *clears* that ceiling — too easy to do damage with from a half-filled form. Set budgets via the CLI / Web UI.
 
 > **Migration from 1.x:** the umbrella `LoomCycle` node (type `loomCycle`) was removed. Workflows built on 1.x must swap each `LoomCycle` node for the matching dedicated node (e.g. a `LoomCycle` node with Resource = Memory → **LoomCycle Memory**); operations and parameters are otherwise unchanged.
 
@@ -241,6 +245,11 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Embedding maintenance | **v1.46** | Memory → Backfill / Purge Stale Embeddings |
 | **Unified memory search** (RFC BV/BW) | **v1.47** | Memory → Search / Embed Stats / Reembed |
 | **Agent Teams** (RFC AP) — Team node | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
+| Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
+| Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits; `limits[]` on a Run result |
+| **Subject erasure** (RFC BL P5) — Erasure node | **v1.45** | also needs `LOOMCYCLE_AUDIT_LOG_PATH` from v1.55 |
+| Directory (derived users / tenants) | **v1.46** | Directory node; List Tenants is admin-only |
+| **Delegated users + tokens** (RFC BX) — User node | **v1.50** | needs a persistent store (503 otherwise) |
 | Runnable-agent discovery (RFC BY) | **v1.51** | Run → List Runnable Agents; agent dropdown fallback |
 | **Chunked-graph Documents** (RFC AK) off-run | **v1.4** | Document node — **also needs `LOOMCYCLE_SQLMEM_ENABLED=1`** |
 | Document tags / links / history / canvas (RFC BS) | **v1.46** | Document → Add Tags / Backlinks / History / Export Canvas |

@@ -1,10 +1,10 @@
 {
 	"name": "@loomcycle/n8n-nodes-loomcycle",
-	"version": "3.14.0",
+	"version": "3.15.0",
 	"publishConfig": {
 		"access": "public"
 	},
-	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 26 nodes — 22 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card, Interruption, LLM, Memory Backend, Operator Token, Snapshot, Volume, Path, Document, Fact, Document Source, Team), 3 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x; interactive run steering requires ≥ v1.1.1; Volume requires ≥ v1.1; Path + Document require ≥ v1.4; image input requires ≥ v1.7; turn-scoped cancel + interrupt decline require ≥ v1.22; session replay requires ≥ v1.25; unified memory search requires ≥ v1.47; Fact + Document Source require ≥ v1.54; Team requires ≥ v1.17.1. Document / Fact need SQL Memory on the sidecar).",
+	"description": "Community n8n nodes for the loomcycle agentic runtime. Design and operate loomcycle agents from n8n's visual builder: 30 nodes — 26 action nodes (Run, Memory, Channel, Agent Definition, Skill Definition, MCP Server, Schedule, Hook, Webhook, A2A Agent, A2A Server Card, Interruption, LLM, Memory Backend, Operator Token, Snapshot, Volume, Path, Document, Fact, Document Source, Team, Directory, Erasure, User, Usage), 3 triggers, and a Chat Model sub-node (routes the AI Agent's LLM calls through loomcycle's gateway, built on @n8n/ai-node-sdk). Zero runtime dependencies. Pairs with loomcycle ≥ v0.9.2 (Schedule + per-tool credentials require ≥ v0.12.x; Webhook + A2A require ≥ v0.14.x; interactive run steering requires ≥ v1.1.1; Volume requires ≥ v1.1; Path + Document require ≥ v1.4; image input requires ≥ v1.7; turn-scoped cancel + interrupt decline require ≥ v1.22; session replay requires ≥ v1.25; unified memory search requires ≥ v1.47; Fact + Document Source require ≥ v1.54; Team requires ≥ v1.17.1; Usage requires ≥ v1.10, budgets ≥ v1.11, Erasure ≥ v1.45, Directory ≥ v1.46, User ≥ v1.50. Document / Fact need SQL Memory on the sidecar).",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -74,6 +74,10 @@
 			"dist/nodes/LoomCycleFact/LoomCycleFact.node.js",
 			"dist/nodes/LoomCycleDocumentSource/LoomCycleDocumentSource.node.js",
 			"dist/nodes/LoomCycleTeam/LoomCycleTeam.node.js",
+			"dist/nodes/LoomCycleDirectory/LoomCycleDirectory.node.js",
+			"dist/nodes/LoomCycleErasure/LoomCycleErasure.node.js",
+			"dist/nodes/LoomCycleUser/LoomCycleUser.node.js",
+			"dist/nodes/LoomCycleUsage/LoomCycleUsage.node.js",
 			"dist/nodes/LoomCycleRunCompleted/LoomCycleRunCompleted.node.js",
 			"dist/nodes/LoomCycleChannelMessage/LoomCycleChannelMessage.node.js",
 			"dist/nodes/LoomCycleInterruptPending/LoomCycleInterruptPending.node.js",

@@ -2,6 +2,38 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.0] — 2026-08-17
+
+**Minor release.** The governance and multi-tenancy surface — who is in the deployment, what is held about them, who may act, and what it costs. Phase 4 of the v1.55 catch-up. **26 → 30 nodes.**
+
+### Added
+
+- **LoomCycle Directory node** (3 ops, loomcycle ≥ v1.46) — `List Users` / `Inspect Subject` / `List Tenants`. Read-only by design: a user here is **derived from run activity**, not a stored record, so there is nothing to write.
+- **LoomCycle Erasure node** (2 ops, RFC BL P5, ≥ v1.45) — `Report` (read-only, three tiers) and `Execute` (removes tiers 1 and 2). The natural home for a GDPR data-subject-request workflow.
+- **LoomCycle User node** (3 ops, RFC BX P2, ≥ v1.50) — `List` / `List Tokens` / `Revoke Token`.
+- **LoomCycle Usage node** (3 ops, RFC AV / AW, ≥ v1.10 / v1.11) — `Usage Report` / `List Limits` / `Get Config`.
+
+### Verified against a live loomcycle v1.55 before implementing
+
+- **`directory` op=tenants refuses a tenant-scoped token outright** rather than returning a filtered list — the substrate's own message explains why, so it passes through unaltered.
+- **`erasure` op=report is not audit-gated**, and a dry-run `execute` is accepted and deletes nothing, echoing `dry_run: true` plus a `deleted` map of what *would* go.
+- The live execute response confirmed its own shape: `retained.usage_ledger` is a prose explanation rather than a count, and `notes` literally states **"THIS RESPONSE IS THE ONLY DURABLE RECORD OF WHAT WAS NOT REACHED"**.
+- `inspect` returned `documents: 1` on this SQL-Memory-enabled instance, confirming that an *absent* `documents` key means the plane was not examined rather than empty.
+
+### Notable design decisions
+
+- **Erasure's confirmation is checked locally, before any wire call.** The substrate requires `confirm === subject`; validating first means a typo cannot reach a destructive endpoint at all. `dryRun` is also sent **explicitly** rather than relying on the server default, so a reader of the payload can see which mode the request is in.
+- **The Erasure response is returned verbatim, dry run or not** — it is the only durable record of tier-3 residue. A test asserts the whole object survives rather than being summarised.
+- **Minting a delegated token is absent from the User node**, exactly as on Operator Token: the substrate returns the bearer plaintext once, and surfacing it would persist a live credential into n8n execution data. Enforced at the op list **and** re-refused in the executor, with tests locking both.
+- **Budget writes and identity CRUD are deliberately out of scope — both are operator work.** Setting a ceiling and provisioning a user belong in the loomcycle CLI / Web UI, not in a workflow that might do either as a side effect. `setLimit` makes the point sharply: it is a full-row upsert, so a tier left blank in an n8n form is *cleared to unlimited* rather than left alone, while a literal `0` would be a zero ceiling refusing every run. Neither reading is what a half-filled form intends. Both families are excluded from their op lists **and** refused in the executor, with tests locking the op lists exactly.
+- **`Revoke Token` is the one write that stays.** Cutting off a leaked credential is precisely the thing worth automating on an alert, and unlike the others it is narrow, reversible in effect (mint a new one) and cannot silently clear anything.
+- **An explicitly empty `tenant` is threaded through, not dropped.** For an admin token `""` selects the default tenant whereas omitting the field makes the server refuse rather than guess — so the two cases must stay distinguishable.
+- **`Delete` on a user says what it does *not* do.** Its envelope states that owned data survives and points at the Erasure node, because "delete user" reads like erasure and is not.
+
+### Requires
+
+Erasure needs `LOOMCYCLE_AUDIT_LOG_PATH` set on the deployment (loomcycle ≥ v1.55) or it is disabled entirely. The User node needs a persistent store (503 otherwise). Budget **writes** stay operator-only even for a tenant member (the RFC CB carve-out).
+
 ## [3.14.0] — 2026-08-17
 
 **Minor release.** Agent Teams (RFC AP) — the closest analogue loomcycle has to an n8n workflow, now designable and runnable from the canvas. Phase 3 of the v1.55 catch-up. **25 → 26 nodes.**
