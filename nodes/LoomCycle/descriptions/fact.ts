@@ -190,7 +190,7 @@ export const factOps: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: { show: { resource: ['fact'], operation: ['upsert_chunk'] } },
-		description: 'Document to file the fact under. Required — a fact is a chunk, so it must live in a document.',
+		description: 'Document to file the fact under, as a document **ID** rather than a Path. Required — a fact is a chunk, so it must live in a document. A path is accepted verbatim by the substrate and yields an invisible orphan, so resolve it with Get Document first.',
 	},
 
 	// ---- Supersede: TWO ids. Verified live — the substrate refuses each in
