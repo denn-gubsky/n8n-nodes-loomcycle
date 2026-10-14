@@ -2,6 +2,21 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] — 2026-10-15
+
+**Minor release (full edition).** Mirrors slim-edition **4.3.0** — Phase 3 of the v1.113 catch-up. **40 → 42 nodes.**
+
+### Added — mirrored from slim 4.3.0
+
+- **LoomCycle Decision** — `Decide` / `List Models` (RFC EB, loomcycle ≥ v1.107): typed questions (choice / yes-no / score) about a JSON state, with `values` for branching.
+- **LoomCycle Evaluation** — `Submit` / `Get` / `List for Run` / `List for Definition` / `Aggregate` (loomcycle ≥ v1.113, tenant-level token).
+
+### Fixed
+
+- A 503 that means the deployment lacks a feature (`decision_not_configured`, `vector_unsupported`, `store_unavailable`) says what is missing instead of "backend unavailable".
+
+Typecheck, lint and tests pass; exercised live on the slim branch against a local loomcycle v1.113.0. **Not yet verified in a live n8n.**
+
 ## [3.2.0] — 2026-10-15
 
 **Minor release (full edition).** Mirrors slim-edition **4.2.0** — Phase 2 of the v1.113 catch-up, the Team node.
