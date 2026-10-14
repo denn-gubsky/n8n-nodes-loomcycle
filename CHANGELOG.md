@@ -2,6 +2,21 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] — 2026-10-15
+
+**Minor release (full edition).** Mirrors slim-edition **4.4.0** — Phase 4 of the v1.113 catch-up, loomcycle's credential store. **43 nodes, 2 credential types.**
+
+### Added — mirrored from slim 4.4.0
+
+- **LoomCycle Credential** node — `Create or Rotate` / `Get` / `List` / `Delete`. The value comes from a **LoomCycle Secret API** credential, never a node parameter; outputs are metadata only.
+- **LoomCycle Secret API** credential type.
+
+### Changed
+
+- The Hook node's *Signing Credential* and the MCP Server node's notice point at the Credential node. The **MCP Server Tool** sub-node's `$cred:` hint was already in place from 3.0.0.
+
+Typecheck, lint and tests pass; exercised live on the slim branch against a local loomcycle v1.113.0. **Not yet verified in a live n8n.**
+
 ## [3.3.0] — 2026-10-15
 
 **Minor release (full edition).** Mirrors slim-edition **4.3.0** — Phase 3 of the v1.113 catch-up. **40 → 42 nodes.**

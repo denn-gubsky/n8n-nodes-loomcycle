@@ -77,6 +77,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
   - **Since loomcycle v1.101–v1.113:** a walk is a run. `Run` can start it **detached** (turn off *Wait for the Walk to Finish*) and returns its `run_id`, which `Cancel Walk`, `List Walk Runs` and the breakpoint ops take. `Run` also sets the team's **Variables**, holds chosen states' answers **for review**, arms **breakpoints**, takes an **Idempotency Key**, and can **ask a human at the iteration cap**. `Create` / `Fork` have a **Promote** toggle (Create on, Fork off by default), and `Verify` checks either a deployed version against a hash or an **unsaved graph** (every problem a save would hit, each with a JSON path). The **Team Tool** sub-node takes operator-pinned **Variables** (the model cannot set them).
 - **LoomCycle Decision** — `Decide` / `List Models` — ask a loomcycle **decision model** typed questions about a piece of state (RFC EB; requires loomcycle ≥ v1.107 and a `decision:` block in its configuration): *Choice* (pick one of 2–26 options), *Yes / No*, or *Score* (a position on a 2–26-level scale, lowest first), 1–64 questions per call. Each answer comes with its probabilities, and the output adds **`values`** — one plain value per question (the chosen option, the yes probability, the score) — for an IF or Switch node. Probabilities are a judgement, not a calibrated measurement.
 - **LoomCycle Evaluation** — `Submit` / `Get` / `List for Run` / `List for Definition` / `Aggregate` — record scores against runs (overall score, named dimensions, a rationale, a structured judgement) and roll them up per agent-definition version, optionally across its fork lineage (requires loomcycle ≥ v1.113). **Needs a tenant-level token** (`substrate:tenant`).
+- **LoomCycle Credential** — `Create or Rotate` / `Get` / `List` / `Delete` — loomcycle's own encrypted credential store (requires loomcycle ≥ v1.113 for the typed adapter, and `LOOMCYCLE_SECRET_KEY` on the loomcycle host). The secret **value is taken from a LoomCycle Secret credential**, never a node parameter, so it is not saved in the workflow or its executions. Every output is metadata only. See [Credentials in loomcycle](#credentials-in-loomcycle).
 - **LoomCycle Directory** — `List Users` / `Inspect Subject` / `List Tenants` — read-only "who is in this deployment and what is held for them" (loomcycle ≥ v1.46). `Inspect` aggregates one subject's activity, chats, memory, documents, budget and usage in one call. There is no create or update: a user here is **derived from run activity**, not stored. `List Tenants` needs an operator-admin token and refuses a tenant-scoped one outright.
 - **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires ≥ v1.45, **and `LOOMCYCLE_AUDIT_LOG_PATH` set** from v1.55). The natural home for a **GDPR data-subject-request workflow**. `Execute` is a **dry run unless you commit**, and committing requires retyping the subject. **Persist the output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
 - **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated tokens (RFC BX P2; ≥ v1.50). Reads plus one revocation by design: identity CRUD is operator work for the CLI / Web UI, while `Revoke Token` stays because cutting off a leaked credential is worth automating on an alert. Minting is absent — the bearer plaintext must not reach execution data.
@@ -146,6 +147,21 @@ The same registration is also available explicitly via the **LoomCycle MCP Serve
 **Tool auto-discovery (loomcycle ≥ v0.20).** Register/Fork run the MCP `tools/list` handshake at registration and return a `discovered` count in the node output — you see the tool surface immediately instead of waiting for first call. It's best-effort: an unreachable peer still registers and self-heals lazily. Untick **Discover Tools at Registration** (action node) to register connection metadata only.
 
 **A create-time check to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one).
+
+### Credentials in loomcycle
+
+Secrets that loomcycle itself must use (an MCP server's token, a hook's signing key) live in **loomcycle's credential store**, encrypted, and are referenced by name as `$cred:<name>`. They are resolved per call, agent > user > tenant, and their value is never returned by any API.
+
+1. In n8n, create a **LoomCycle Secret API** credential holding the value.
+2. Run **LoomCycle Credential → Create or Rotate** with that credential, a name and a scope. The value goes to loomcycle once. Re-run it to rotate.
+3. Reference it as `$cred:<name>` in MCP server headers (including the MCP Server Tool sub-node), hook headers, a hook's **Signing Credential**, or per-tool credentials.
+
+*Send It To* sets where loomcycle may send the value:
+- **anywhere** (the default; on a rotate, the existing restriction is kept);
+- **only under these https URLs**;
+- **nowhere**, a compare-only value. A compare-only credential cannot sign hook deliveries.
+
+*Expires At* makes loomcycle refuse the credential everywhere after that moment.
 
 ### Secrets in headers: `$cred:<name>`
 
@@ -259,6 +275,7 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | Team Promote / Retire / Verify (incl. unsaved graph), fork-with-promote, ask at cap | **v1.113** | Team node |
 | **Decision models** (RFC EB) | **v1.107** | Decision node — also needs a `decision:` block (Ollama ≥ 0.35 serves the models) |
 | **Evaluation over HTTP** | **v1.113** | Evaluation node — tenant-level token |
+| **Credential store** (typed adapter, `expires_at` enforced) | **v1.113** | Credential node + LoomCycle Secret API credential — needs `LOOMCYCLE_SECRET_KEY` |
 | **Agent Teams** (RFC AP) — Team node + Team Tool | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
 | Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
 | Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits |
