@@ -97,28 +97,146 @@ export const webhookDefOps: INodeProperties[] = [
 		description: 'Def_id of the row to fork. The new row inherits all fields not present in the overlay.',
 	},
 
-	// ---- Agent (Create) ----
+	// ---- Delivery (Create) ----
+	{
+		displayName: 'Each Delivery',
+		name: 'webhookDelivery',
+		type: 'options',
+		default: 'spawn',
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'] } },
+		options: [
+			{ name: 'Runs an Agent', value: 'spawn', description: 'Spawn the agent below with the request' },
+			{ name: 'Publishes to a Channel', value: 'channel', description: 'Publish the request body to the channel below' },
+			{
+				name: 'Starts a Team Walk',
+				value: 'team',
+				description: 'Start a detached walk of a team with the raw body as its input (loomcycle ≥ v1.104)',
+			},
+		],
+		description: 'What an accepted delivery does. Exactly one: the server refuses a webhook that names two.',
+	},
+
+	// ---- Agent (Create, spawn) ----
 	{
 		displayName: 'Agent Name or ID',
 		name: 'agent',
 		type: 'options',
 		typeOptions: { loadOptionsMethod: 'loadAgents' },
 		default: '',
-		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'] } },
+		required: true,
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'], webhookDelivery: ['spawn'] } },
 		description:
-			'Agent spawned when the webhook fires. Leave empty if the webhook publishes to a channel instead. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			'Agent spawned when the webhook fires. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
 
-	// ---- Channel (Create, optional alternative to agent) ----
+	// ---- Channel (Create, channel) ----
 	{
 		displayName: 'Channel Name or ID',
 		name: 'channel',
 		type: 'options',
 		typeOptions: { loadOptionsMethod: 'loadChannels' },
 		default: '',
-		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'] } },
+		required: true,
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'], webhookDelivery: ['channel'] } },
 		description:
-			'Channel the inbound payload is published to (instead of / in addition to spawning an agent). Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			'Channel the inbound body is published to. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+	},
+
+	// ---- Team (Create, team) ----
+	{
+		displayName: 'Team Name or ID',
+		name: 'webhookTeam',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'loadTeams' },
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'], webhookDelivery: ['team'] } },
+		description:
+			'The team each delivery walks. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+	},
+	{
+		displayName: 'Team Variables From the Body',
+		name: 'webhookTeamVars',
+		type: 'fixedCollection',
+		placeholder: 'Add Variable',
+		default: {},
+		typeOptions: { multipleValues: true },
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'], webhookDelivery: ['team'] } },
+		options: [
+			{
+				name: 'variable',
+				displayName: 'Variable',
+				values: [
+					{ displayName: 'Name', name: 'name', type: 'string', default: '', required: true },
+					{
+						displayName: 'JSONPath',
+						name: 'value',
+						type: 'string',
+						default: '',
+						required: true,
+						placeholder: '$.repository.full_name',
+						description: 'Where in the request body the value is: $, .key and [N] only. A missing path leaves the team\'s default.',
+					},
+				],
+			},
+		],
+		description: 'Set the team\'s declared variables from each delivery\'s body. Unlike a schedule, these are paths, not literal values.',
+	},
+
+	// ---- Verification (Create) ----
+	{
+		displayName: 'Verification',
+		name: 'verification',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['webhookDef'], operation: ['create'] } },
+		options: [
+			{
+				displayName: 'Events (Comma-Separated)',
+				name: 'events',
+				type: 'string',
+				default: '',
+				placeholder: 'push, pull_request',
+				description:
+					'Only these events start anything, by the name the event header carries; any other event is answered 202 ignored. Needs a provider (or an event_header and event_shapes in the Advanced Overlay).',
+			},
+			{
+				displayName: 'Method',
+				name: 'authKind',
+				type: 'options',
+				default: '',
+				options: [
+					{ name: 'Bearer Token', value: 'bearer' },
+					{ name: 'From Provider or Advanced Overlay', value: '' },
+					{ name: 'HMAC Signature', value: 'hmac' },
+					{ name: 'None (Not Recommended)', value: 'none' },
+				],
+				description: 'How loomcycle checks a delivery came from the sender',
+			},
+			{
+				displayName: 'Provider',
+				name: 'provider',
+				type: 'options',
+				default: '',
+				options: [
+					{ name: 'GitHub', value: 'github' },
+					{ name: 'Gitea', value: 'gitea' },
+					{ name: 'GitLab', value: 'gitlab' },
+					{ name: 'None', value: '' },
+				],
+				description: 'A forge whose signature, delivery-ID and event headers loomcycle should expect (loomcycle ≥ v1.113)',
+			},
+			{
+				displayName: 'Verification Credential',
+				name: 'verificationCredential',
+				type: 'string',
+				default: '',
+				placeholder: '$cred:github-webhook-secret',
+				description:
+					'The shared secret, as a stored loomcycle credential: $cred:&lt;name&gt;, a tenant-level one (loomcycle ≥ v1.113). Store it with the LoomCycle Credential node, ideally Compare Only so it is never sent anywhere. Read on every delivery, so rotating it needs no restart.',
+			},
+		],
 	},
 
 	// ---- Enabled (Create) ----
@@ -212,7 +330,7 @@ export const webhookDefOps: INodeProperties[] = [
 
 	// ---- Env-var hint notice (Create) ----
 	{
-		displayName: 'Loomcycle resolves auth secrets (signing_secret_env / bearer_token_env) from its OWN env at request time — set those env vars on the loomcycle deployment. Plaintext secrets are never accepted here.',
+		displayName: 'Every webhook verifies its deliveries. Prefer Verification → Verification Credential ($cred:&lt;name&gt;, stored with the LoomCycle Credential node). An env-var secret (auth.signing_secret_env / bearer_token_env in the Advanced Overlay) must exist in loomcycle\'s own environment. Plaintext secrets are never accepted. From loomcycle v1.113 an unknown overlay key is refused.',
 		name: 'envVarNotice',
 		type: 'notice',
 		default: '',

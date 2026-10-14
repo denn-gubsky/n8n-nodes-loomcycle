@@ -90,6 +90,12 @@ export const channelOps: INodeProperties[] = [
 				action: 'Purge a channel',
 			},
 			{
+				name: 'Release',
+				value: 'release',
+				description: 'Deliver messages a held channel is storing, oldest first (loomcycle ≥ v1.77)',
+				action: 'Release held channel messages',
+			},
+			{
 				name: 'Subscribe',
 				value: 'subscribe',
 				description: 'Long-poll for the next message batch and auto-advance the cursor',
@@ -114,7 +120,7 @@ export const channelOps: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'purgeChannel'] },
+			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'purgeChannel', 'release'] },
 		},
 		description:
 			'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
@@ -139,7 +145,7 @@ export const channelOps: INodeProperties[] = [
 		type: 'options',
 		default: 'global',
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast'] },
+			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast', 'release'] },
 		},
 		options: [
 			{ name: 'Global (Admin)', value: 'global', description: 'Admin-scoped channel — single global queue' },
@@ -155,9 +161,24 @@ export const channelOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		displayOptions: {
-			show: { resource: ['channel'], operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast'], scope: ['user'] },
+			show: {
+				resource: ['channel'],
+				operation: ['publish', 'subscribe', 'peek', 'ack', 'await', 'broadcast', 'release'],
+				scope: ['user'],
+			},
 		},
 		description: 'User_id for the per-user scope. Empty = use the credential\'s Default User ID.',
+	},
+
+	// ---- Release: how many ----
+	{
+		displayName: 'Count',
+		name: 'releaseCount',
+		type: 'number',
+		default: 1,
+		typeOptions: { minValue: 1, maxValue: 1000 },
+		displayOptions: { show: { resource: ['channel'], operation: ['release'] } },
+		description: 'How many held messages to deliver, oldest first (at most 1 000). Needs publish rights on the channel.',
 	},
 
 	// ---- Await: predicate mode + threshold ----
@@ -286,6 +307,14 @@ export const channelOps: INodeProperties[] = [
 				description: 'Free-form description shown in listings + dashboards',
 			},
 			{
+				displayName: 'Hold Messages',
+				name: 'hold',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether published messages are stored but not delivered until a Release (loomcycle ≥ v1.77). A message\'s TTL still runs while it is held.',
+			},
+			{
 				displayName: 'Max Messages',
 				name: 'maxMessages',
 				type: 'number',
@@ -299,6 +328,15 @@ export const channelOps: INodeProperties[] = [
 				type: 'string',
 				default: '',
 				description: 'Free-form retention hint. Informational only — not enforced by the substrate.',
+			},
+			{
+				displayName: 'Publish Hook Names or IDs',
+				name: 'publishHooks',
+				type: 'multiOptions',
+				typeOptions: { loadOptionsMethod: 'loadHookDefNames' },
+				default: [],
+				description:
+					'Channel_publish hook definitions that decide on every message: release, rewrite, drop or hold (loomcycle ≥ v1.99, LOOMCYCLE_CHANNEL_HOOKS=1). Delivery may be reordered while hooks decide. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Publisher',
@@ -344,11 +382,43 @@ export const channelOps: INodeProperties[] = [
 		description: 'Only the fields you set here are updated. Omitted fields stay unchanged.',
 		options: [
 			{
+				displayName: 'Default TTL Seconds',
+				name: 'defaultTtl',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'Adjust the message TTL. 0 = no TTL.',
+			},
+			{
 				displayName: 'Description',
 				name: 'description',
 				type: 'string',
 				default: '',
 				description: 'New description text',
+			},
+			{
+				displayName: 'Hold Messages',
+				name: 'hold',
+				type: 'boolean',
+				default: false,
+				description: 'Whether published messages are stored but not delivered until a Release. Turning it off delivers nothing held; release those first.',
+			},
+			{
+				displayName: 'Max Messages',
+				name: 'maxMessages',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'Adjust the retention cap. 0 = unbounded.',
+			},
+			{
+				displayName: 'Publish Hook Names or IDs',
+				name: 'publishHooks',
+				type: 'multiOptions',
+				typeOptions: { loadOptionsMethod: 'loadHookDefNames' },
+				default: [],
+				description:
+					'Replace the channel_publish hooks. Add this field with nothing selected to remove them all. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Semantic',
@@ -360,22 +430,6 @@ export const channelOps: INodeProperties[] = [
 					{ name: 'Topic', value: 'topic' },
 				],
 				description: 'Change the delivery semantic',
-			},
-			{
-				displayName: 'Default TTL Seconds',
-				name: 'defaultTtl',
-				type: 'number',
-				default: 0,
-				typeOptions: { minValue: 0 },
-				description: 'Adjust the message TTL. 0 = no TTL.',
-			},
-			{
-				displayName: 'Max Messages',
-				name: 'maxMessages',
-				type: 'number',
-				default: 0,
-				typeOptions: { minValue: 0 },
-				description: 'Adjust the retention cap. 0 = unbounded.',
 			},
 		],
 	},
