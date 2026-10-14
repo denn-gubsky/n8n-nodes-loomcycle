@@ -94,6 +94,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 
 ### Trigger nodes
 
+- **LoomCycle: Hook Call** — **n8n as the policy behind a loomcycle hook** (loomcycle ≥ v1.113 for signed calls). Point a HookDef's webhook URL here and the workflow decides each call — deny or rewrite a tool call, add context, keep an agent working or hold its answer for review, release or drop a channel message. Signatures are verified **fail-closed** with the LoomCycle Secret API credential, inside a replay window, and each signed delivery is accepted once. See [Hook policy in n8n](#hook-policy-in-n8n).
 - **LoomCycle: Review Pending** — polls for runs whose answer is **held for review** (loomcycle ≥ v1.113), so a person can rule on it with **Run → Review**. A rejected answer that comes back revised fires again.
 - **LoomCycle: Run Completed** — fires when an agent run reaches a terminal state. SSE primary with polling fallback for proxy-hostile deployments. Honours `parentAgentId` + `debug` filters from the adapter.
 - **LoomCycle: Channel Message** — long-poll subscribe with two delivery modes: `auto-ack` (at-most-once) and `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
@@ -223,6 +224,18 @@ The other direction: the agent has *finished*, and a person decides whether its 
 
 A hold nobody rules on before `expiresAt` ends the run as `rejected` (`review_expired`) — an unreviewed answer is never approved by default. *Review Time Limit* sets the window.
 
+## Hook policy in n8n
+
+A loomcycle hook can ask an n8n workflow what to do. This puts the policy for agent actions on the n8n canvas.
+
+1. **Share a secret.** Create a **LoomCycle Secret API** credential and run **LoomCycle Credential → Create or Rotate** with it, say as `n8n-hook-signing`. Leave *Send It To* on *Anywhere*, or restrict it to the trigger's https URL; a compare-only credential cannot sign.
+2. **Add the trigger.** Add **LoomCycle: Hook Call** with the same credential, and copy its Production URL.
+3. **Define the hook.** In **LoomCycle Hook → Create**: Body *Webhook*, URL = that Production URL, Signing Credential = `$cred:n8n-hook-signing`, the event, and *Fail Mode*.
+4. **Attach it.** Name the hook in an agent definition, on a team state, or on one run (**Run → Spawn → Hooks**).
+5. **Answer.** By default the last node's first item is the answer: `{}` allows, `{"deny": {"text": "…"}}` blocks a tool call, `{"decision": "deny", "reason": "…"}` stops a run before it starts, `{"decision": "hold", …}` on `agent_stop` holds the answer for review, and `{"additional_context": "…"}` adds guidance.
+
+Answer within the hook's timeout: 5 s by default, 60 s at most.
+
 ## Local development install
 
 Want to install from the local checkout for development?
@@ -286,6 +299,7 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | Held channels + Release · schedule channel delivery · channel publish hooks | **v1.77 · v1.99** | Channel; Schedule → Each Fire |
 | Team delivery for schedules and webhooks · schedule overlap policy | **v1.104 · v1.105** | Schedule / Webhook |
 | Schedule state / run-now / pause / resume · webhook `$cred:` verification + forge providers | **v1.113** | Schedule runtime ops; Webhook → Verification |
+| **Signed hook deliveries** (`X-Loomcycle-Signature`, body `delivery_id`) | **v1.113** | LoomCycle: Hook Call trigger |
 | **Agent Teams** (RFC AP) — Team node + Team Tool | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
 | Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
 | Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits |
