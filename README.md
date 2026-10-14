@@ -259,6 +259,8 @@ A loomcycle hook can ask an n8n workflow what to do. This puts the policy for ag
    
    The trigger's notice lists every event's answers. Use *Respond: Immediately* for observe-only events such as `run_end`.
 
+**One secret per trigger**, or list the trigger's hooks under *Only These Hooks*. The signature covers the call, not the URL it was sent to, so a trigger that accepts any hook signed with a shared secret could be handed a call captured for another hook. Replay protection is exact within one n8n process and best-effort across queue-mode workers; the replay window is the hard bound.
+
 Answer within the hook's timeout: 5 s by default, 60 s at most. A private-network n8n URL must be on the loomcycle host's `LOOMCYCLE_HOOKS_PRIVATE_HOST_ALLOWLIST`, and *Allowed URLs* on a credential take https only.
 
 ## Local development install

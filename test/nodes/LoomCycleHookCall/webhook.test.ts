@@ -82,6 +82,46 @@ describe('LoomCycle: Hook Call — webhook()', () => {
 		expect(retry.workflowData?.[0][0].json).toEqual(BODY);
 	});
 
+	// Security review: a count-capped seen set let a busy hook evict a pair that
+	// was still inside the window, making it replayable. Pruning is by age only.
+	it('still refuses a replay after more than 1 000 newer deliveries inside the window', async () => {
+		const staticData: Record<string, unknown> = {};
+		const raw = JSON.stringify(BODY);
+		const now = Math.floor(Date.now() / 1000);
+		const captured = sign(raw, now - 10);
+		await call({ raw, signature: captured, staticData });
+		for (let n = 0; n < 1100; n++) {
+			const body = { ...BODY, delivery_id: `flood-${n}` };
+			const r = JSON.stringify(body);
+			await call({ body, raw: r, signature: sign(r, now), staticData });
+		}
+		await expect(call({ raw, signature: captured, staticData })).rejects.toThrow(/Refusing a replay/);
+	});
+
+	it('forgets pairs older than the window, which the timestamp check already refuses', async () => {
+		const staticData: Record<string, unknown> = { hookCallSeen: { 'old@1': 1, 'kept@9999999999': 9999999999 } };
+		await call({ staticData });
+		const seen = staticData.hookCallSeen as Record<string, number>;
+		expect(seen).not.toHaveProperty('old@1');
+		expect(seen).toHaveProperty('kept@9999999999');
+	});
+
+	// Security review: the signature covers the body, not the endpoint, so a
+	// call captured for one hook could be replayed to another trigger sharing
+	// the secret. The signed hook_name binds it.
+	it('refuses a signed call for a hook this trigger does not serve', async () => {
+		await expect(call({ params: { expectedHooks: 'n8n-web-gate, other' } })).rejects.toThrow(/serves n8n-web-gate, other/);
+		const res = await call({ params: { expectedHooks: 'n8n-signed-start' } });
+		expect(res.workflowData?.[0][0].json).toEqual(BODY);
+	});
+
+	it('emits the signed bytes, not a body n8n parsed differently', async () => {
+		const raw = JSON.stringify(BODY);
+		const now = Math.floor(Date.now() / 1000);
+		const res = await call({ raw, body: { ...BODY, agent: 'injected' }, signature: sign(raw, now) });
+		expect((res.workflowData?.[0][0].json as IDataObject).agent).toBe('echo');
+	});
+
 	it('refuses a signed call with no delivery_id, which cannot be checked for replay', async () => {
 		const body = { ...BODY } as IDataObject;
 		delete body.delivery_id;
