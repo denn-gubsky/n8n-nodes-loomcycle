@@ -5,7 +5,7 @@ import { loadHookDefNames } from '../LoomCycle/helpers/loadOptions';
 import { hookOps } from '../LoomCycle/descriptions';
 
 /**
- * LoomCycle Hook — HookDef admin (RFC DK, loomcycle ≥ v1.97): create, fork,
+ * LoomCycle Hook — HookDef admin (RFC DK, loomcycle ≥ v1.96): create, fork,
  * promote, retire, verify and delete reusable hook definitions. A webhook body
  * typically points at a LoomCycle: Hook Call trigger, so an n8n workflow
  * answers the hook. Replaces the register / list / delete operations, whose

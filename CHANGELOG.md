@@ -26,6 +26,14 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 - **Path**: List **Page Size** and **Cursor** (v1.76).
 - **Memory**: Search **Said After / Said Before / True At** (v1.66).
 
+### Corrected
+
+- **Version claims in Phases 0–4** (4.0.0–4.4.0), checked against the release each feature first shipped in. They are description text only; no behaviour changed.
+  - HookDef needs loomcycle ≥ **v1.96**, not v1.97. v1.97 is where the old registration API was removed.
+  - Retune and Get Run Config need **v1.83** (per-run model overrides v1.82), and Context Mode needs **v1.70**, not v1.85.
+  - A team walk has been a run since **v1.77**, not v1.101. Team variables arrived in **v1.104**, not v1.89.
+  - Team Promote / Retire / Verify have been on the adapter since **v1.77**, not v1.113 as 4.2.0 said. Only fork-with-promote and ask-at-cap are v1.113, verifying an unsaved graph is v1.105, and team channels are v1.108.
+
 ### Verified against a local loomcycle v1.113.0
 
 Through the compiled nodes:

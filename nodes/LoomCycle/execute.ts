@@ -1813,7 +1813,7 @@ async function executeTeam(
 }
 
 /**
- * HookDef (RFC DK, loomcycle ≥ v1.97) — reusable, versioned hook definitions.
+ * HookDef (RFC DK, loomcycle ≥ v1.96) — reusable, versioned hook definitions.
  * The old global registration (`registerHook`) was removed upstream along with
  * its table, so a hook is now a definition that an agent, team or run names.
  *
