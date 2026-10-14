@@ -2,7 +2,7 @@ import type { INodeProperties } from 'n8n-workflow';
 
 /**
  * Operation descriptions for the `hook` resource — HookDef (RFC DK,
- * loomcycle ≥ v1.97): reusable, versioned hook definitions.
+ * loomcycle ≥ v1.96): reusable, versioned hook definitions.
  *
  * loomcycle v1.97 removed the old global hook registration (POST /v1/hooks,
  * `registerHook`) together with its table, so this resource now manages
