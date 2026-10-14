@@ -2,6 +2,22 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] — 2026-10-15
+
+**Minor release (full edition).** Mirrors slim-edition **4.2.0** — Phase 2 of the v1.113 catch-up, the Team node.
+
+### Added — mirrored from slim 4.2.0
+
+- **Team lifecycle:** Promote, Retire, List Versions, Verify (hash, or an unsaved graph); a Promote toggle on Create / Fork.
+- **Walks:** detached Run returning the walk's `run_id`; Cancel Walk, List Walk Runs, Get / Set Breakpoints; Run options for Variables, review states, breakpoints, idempotency key and asking a human at the iteration cap.
+- **Team channels:** List / Peek / Release.
+
+### Added — full edition only
+
+- **Team Tool → Variables.** The operator pins the team's variables on the sub-node, and every walk the tool starts sets them. The model cannot set or add variables: like the pinned team name, they are read once at configuration time, never from the tool call.
+
+Typecheck, lint and tests pass. The Team node was exercised live on the slim branch against a local loomcycle v1.113.0. **Not yet verified in a live n8n.**
+
 ## [3.1.0] — 2026-10-15
 
 **Minor release (full edition).** Mirrors slim-edition **4.1.0** — Phase 1 of the v1.113 catch-up, the run controls. **39 → 40 nodes.**

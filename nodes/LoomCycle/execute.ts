@@ -28,6 +28,7 @@ import type {
 	RunOptions,
 	SetMemoryEntryOptions,
 	SubstrateToolInput,
+	TeamRunTarget,
 	UpdateChannelOptions,
 	UsageDimension,
 	VolumeMode,
@@ -1585,11 +1586,106 @@ async function executeTeam(
 		}) as Record<string, unknown>;
 		const description = (ctx.getNodeParameter('defDescription', i, '') as string).trim();
 		if (description) overlay.description = description;
+		// Create promotes by default and Fork does not; both now say so on the
+		// wire (loomcycle ≥ v1.113), so the node's toggle is the whole truth.
+		const promote = ctx.getNodeParameter('promote', i, operation === 'create') as boolean;
 
-		const resp =
-			operation === 'create'
-				? await client.createTeam(name, overlay)
-				: await client.forkTeam(name, overlay);
+		if (operation === 'create') {
+			const resp = await client.createTeam(name, overlay, { promote });
+			return resp as unknown as IDataObject;
+		}
+		const parentDefId = (ctx.getNodeParameter('parentDefId', i, '') as string).trim();
+		const resp = await client.forkTeam(name, overlay, { promote, ...(parentDefId ? { parentDefId } : {}) });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listVersions') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const resp = await client.listTeamVersions(name);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'promote') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		return (await client.promoteTeam(defId)) as unknown as IDataObject;
+	}
+
+	if (operation === 'retire') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		const retired = ctx.getNodeParameter('retired', i, true) as boolean;
+		return (await client.retireTeam(defId, retired)) as unknown as IDataObject;
+	}
+
+	if (operation === 'verify') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const mode = ctx.getNodeParameter('verifyMode', i, 'hash') as string;
+		if (mode === 'draft') {
+			const overlay = parseJsonField(ctx.getNodeParameter('draftOverlay', i, '{}') as unknown, {
+				strict: true,
+				node: ctx.getNode(),
+			}) as Record<string, unknown>;
+			const as = ctx.getNodeParameter('draftAs', i, 'create') as 'create' | 'fork';
+			return (await client.verifyTeam(name, { overlay, as })) as unknown as IDataObject;
+		}
+		const contentSha256 = ctx.getNodeParameter('contentSha256', i) as string;
+		return (await client.verifyTeam(name, contentSha256)) as unknown as IDataObject;
+	}
+
+	if (operation === 'cancelWalk') {
+		// A walk is a run; cancelling its turn ENDS the walk and every agent it
+		// started (a team-walk run never parks), per loomcycle's run-cancel path.
+		const runId = ctx.getNodeParameter('walkRunId', i) as string;
+		return (await client.cancelTurn(runId)) as unknown as IDataObject;
+	}
+
+	if (operation === 'listWalkRuns') {
+		const runId = ctx.getNodeParameter('walkRunId', i) as string;
+		const pageSize = ctx.getNodeParameter('pageSize', i, 100) as number;
+		const cursor = ctx.getNodeParameter('cursor', i, '') as string;
+		const resp = await client.listWalkRuns(runId, {
+			...(pageSize > 0 ? { limit: pageSize } : {}),
+			...(cursor ? { cursor } : {}),
+		});
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'getBreakpoints') {
+		const runId = ctx.getNodeParameter('walkRunId', i) as string;
+		return (await client.getRunBreakpoints(runId)) as unknown as IDataObject;
+	}
+
+	if (operation === 'setBreakpoints') {
+		const runId = ctx.getNodeParameter('walkRunId', i) as string;
+		// The set REPLACES the armed one, so an empty field is a real request:
+		// it disarms every breakpoint.
+		const breakpoints = parseCsv(ctx.getNodeParameter('setBreakpointList', i, '') as string) ?? [];
+		const ttl = ctx.getNodeParameter('setBreakpointTtl', i, 0) as number;
+		const resp = await client.setRunBreakpoints(runId, breakpoints, ttl > 0 ? { reviewTtlSeconds: ttl } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listChannels') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		return (await client.listTeamChannels(name)) as unknown as IDataObject;
+	}
+
+	if (operation === 'peekChannel' || operation === 'releaseChannel') {
+		const name = ctx.getNodeParameter('teamName', i) as string;
+		const channel = ctx.getNodeParameter('teamChannel', i) as string;
+		const opts = ctx.getNodeParameter('channelOptions', i, {}) as IDataObject;
+		const userId = typeof opts.userId === 'string' && opts.userId ? { userId: opts.userId } : {};
+		if (operation === 'peekChannel') {
+			const resp = await client.peekTeamChannel(name, channel, {
+				...userId,
+				...(typeof opts.fromCursor === 'string' && opts.fromCursor ? { fromCursor: opts.fromCursor } : {}),
+				...(typeof opts.maxMessages === 'number' && opts.maxMessages > 0 ? { maxMessages: opts.maxMessages } : {}),
+			});
+			return resp as unknown as IDataObject;
+		}
+		const resp = await client.releaseTeamChannel(name, channel, {
+			...userId,
+			...(typeof opts.count === 'number' && opts.count > 0 ? { count: opts.count } : {}),
+		});
 		return resp as unknown as IDataObject;
 	}
 
@@ -1613,14 +1709,9 @@ async function executeTeam(
 		const targetBy = ctx.getNodeParameter('runTargetBy', i, 'name') as string;
 		const input = (ctx.getNodeParameter('input', i, '') as string).trim();
 		const boardOptions = ctx.getNodeParameter('boardOptions', i, {}) as IDataObject;
+		const walkOptions = ctx.getNodeParameter('walkOptions', i, {}) as IDataObject;
 
-		const target: {
-			name?: string;
-			defId?: string;
-			input?: string;
-			boardChunkId?: string;
-			boardScope?: 'agent' | 'user';
-		} = {};
+		const target: TeamRunTarget = {};
 		if (targetBy === 'defId') {
 			target.defId = ctx.getNodeParameter('runDefId', i) as string;
 		} else {
@@ -1634,6 +1725,20 @@ async function executeTeam(
 				target.boardScope = boardOptions.boardScope as 'agent' | 'user';
 			}
 		}
+
+		const vars = collectNameValuePairs(ctx.getNodeParameter('runVars', i, {}), 'variable');
+		if (Object.keys(vars).length > 0) target.vars = vars;
+		if (ctx.getNodeParameter('waitForWalk', i, true) === false) target.mode = 'detach';
+		const breakpoints = parseCsv(walkOptions.breakpoints as string);
+		if (breakpoints !== undefined) target.breakpoints = breakpoints;
+		const reviewStates = parseCsv(walkOptions.reviewStates as string);
+		if (reviewStates !== undefined) target.review = reviewStates;
+		if (typeof walkOptions.reviewTtlSeconds === 'number' && walkOptions.reviewTtlSeconds > 0) {
+			target.reviewTtlSeconds = walkOptions.reviewTtlSeconds;
+		}
+		const idempotencyKey = typeof walkOptions.idempotencyKey === 'string' ? walkOptions.idempotencyKey.trim() : '';
+		if (idempotencyKey) target.idempotencyKey = idempotencyKey;
+		if (walkOptions.interruptOnCap === true) target.interruptOnCap = true;
 
 		const resp = await client.runTeam(target);
 		return resp as unknown as IDataObject;
