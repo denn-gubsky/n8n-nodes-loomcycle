@@ -9,6 +9,7 @@ All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows
 ### Added — mirrored from slim 4.6.0
 
 - **LoomCycle: Hook Call** webhook trigger: n8n as the policy behind a loomcycle hook. It verifies signatures fail-closed with the LoomCycle Secret API credential, and protects against replay with a timestamp window plus each `(delivery_id, t)` accepted once. It answers from the last node, a Respond to Webhook node, or immediately with an allowing `{}`.
+  - The seen pairs are pruned by **age**, never by count, so a busy hook cannot evict a still-replayable pair. **Only These Hooks** binds the trigger to the signed `hook_name`. The emitted data is parsed from the signed bytes. These hardenings came from a security review before release.
 - README section **Hook policy in n8n**.
 
 Typecheck, lint and tests pass. The trigger verified a real signed delivery from a local loomcycle v1.113.0 on the slim branch. **Not yet verified in a live n8n.**

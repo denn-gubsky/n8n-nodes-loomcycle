@@ -234,6 +234,8 @@ A loomcycle hook can ask an n8n workflow what to do. This puts the policy for ag
 4. **Attach it.** Name the hook in an agent definition, on a team state, or on one run (**Run → Spawn → Hooks**).
 5. **Answer.** By default the last node's first item is the answer: `{}` allows, `{"deny": {"text": "…"}}` blocks a tool call, `{"decision": "deny", "reason": "…"}` stops a run before it starts, `{"decision": "hold", …}` on `agent_stop` holds the answer for review, and `{"additional_context": "…"}` adds guidance.
 
+**One secret per trigger**, or list the trigger's hooks under *Only These Hooks*. The signature covers the call, not the URL it was sent to. Replay protection is exact within one n8n process and best-effort across queue-mode workers; the replay window is the hard bound.
+
 Answer within the hook's timeout: 5 s by default, 60 s at most.
 
 ## Local development install

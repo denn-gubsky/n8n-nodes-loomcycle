@@ -8,9 +8,7 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { readSeenSet, writeSeenSet } from '../LoomCycle/helpers/staticData';
-
-const SEEN_KEY = 'hookCall';
+const SEEN_KEY = 'hookCallSeen';
 
 /**
  * `LoomCycle: Hook Call` — n8n as the policy behind a loomcycle hook.
@@ -35,6 +33,13 @@ const SEEN_KEY = 'hookCall';
  * retry with a fresh t, so a retry still gets through while a captured request
  * replayed verbatim does not. The X-Loomcycle-Delivery / -Hook headers are not
  * signed and are never trusted.
+ *
+ * The seen pairs are pruned by AGE, not count: a pair older than the window can
+ * no longer pass the timestamp check, so dropping it is safe, while a count cap
+ * would let a busy hook evict a still-replayable pair. The record lives in the
+ * workflow's static data, so it is exact within one n8n process; across
+ * concurrent executions or queue-mode workers it is best-effort, and the
+ * timestamp window is the hard bound — keep it short.
  *
  * Any refusal throws, so n8n answers with an error status and the hook's own
  * fail_mode decides what loomcycle does with the call.
@@ -70,7 +75,7 @@ export class LoomCycleHookCall implements INodeType {
 		properties: [
 			{
 				displayName:
-					'Point a hook at this node: in the LoomCycle Hook node, Create a hook with Body "Webhook", URL = this node\'s Production URL, and Signing Credential = $cred:&lt;name&gt; of a credential you stored with the LoomCycle Credential node from the SAME LoomCycle Secret API credential selected here. Then name the hook in an agent definition, a team state or a run.',
+					'Point a hook at this node: in the LoomCycle Hook node, Create a hook with Body "Webhook", URL = this node\'s Production URL, and Signing Credential = $cred:&lt;name&gt; of a credential you stored with the LoomCycle Credential node from the SAME LoomCycle Secret API credential selected here. Then name the hook in an agent definition, a team state or a run. Give each trigger its own secret, or list its hooks under Only These Hooks.',
 				name: 'hookCallSetupNotice',
 				type: 'notice',
 				default: '',
@@ -82,6 +87,16 @@ export class LoomCycleHookCall implements INodeType {
 				default: true,
 				description:
 					'Whether to accept only calls signed by loomcycle with the selected LoomCycle Secret API value. Turn off only on a network where nothing else can reach this URL — an unsigned hook URL lets anyone allow or deny agent actions.',
+			},
+			{
+				displayName: 'Only These Hooks (Comma-Separated)',
+				name: 'expectedHooks',
+				type: 'string',
+				default: '',
+				placeholder: 'n8n-web-gate',
+				displayOptions: { show: { verifySignature: [true] } },
+				description:
+					'Refuse a signed call unless its hook_name (part of what loomcycle signs) is one of these. Set it whenever this secret signs more than one hook: otherwise a call captured for one hook could be replayed to this trigger.',
 			},
 			{
 				displayName: 'Replay Window (Seconds)',
@@ -133,6 +148,7 @@ export class LoomCycleHookCall implements INodeType {
 		const headers = this.getHeaderData() as Record<string, string | string[] | undefined>;
 
 		let signedAt: string | undefined;
+		let signedBody: IDataObject | undefined;
 		if (verify) {
 			const credentials = await this.getCredentials('loomCycleSecretApi');
 			const secret = typeof credentials.value === 'string' ? credentials.value : '';
@@ -172,23 +188,43 @@ export class LoomCycleHookCall implements INodeType {
 				);
 			}
 			signedAt = parsed.t;
+			// What the workflow sees must be exactly what loomcycle signed, so it
+			// is parsed from those bytes, not from n8n's separately parsed body.
+			signedBody = parseSignedBody(raw);
+			if (!signedBody) {
+				throw new NodeOperationError(node, 'The signed body is not a JSON object. Refusing the call.');
+			}
+			// The signature does not name the endpoint, only the body: bind this
+			// trigger to the hooks it serves via the signed hook_name.
+			const servedHooks = parseList(this.getNodeParameter('expectedHooks', '') as string);
+			const hookName = typeof signedBody.hook_name === 'string' ? signedBody.hook_name : '';
+			if (servedHooks.length > 0 && !servedHooks.includes(hookName)) {
+				throw new NodeOperationError(
+					node,
+					`This trigger serves ${servedHooks.join(', ')}, but the signed call is for hook "${hookName}". Refusing it.`,
+				);
+			}
 		}
 
-		const body = this.getBodyData() as IDataObject;
+		const body = signedBody ?? (this.getBodyData() as IDataObject);
 		const deliveryId = typeof body.delivery_id === 'string' ? body.delivery_id : '';
 		if (signedAt !== undefined) {
 			if (!deliveryId) {
 				throw new NodeOperationError(node, 'A signed call without a delivery_id cannot be checked for replay. Refusing it.');
 			}
 			// Each (delivery_id, t) once. A retry is re-signed with a new t and
-			// passes; the same captured request replayed does not.
-			const seen = readSeenSet(this, SEEN_KEY);
+			// passes; the same captured request replayed does not. The check and
+			// the write run with no await between them, so two requests in one
+			// process cannot both pass.
+			const windowSeconds = this.getNodeParameter('replayWindowSeconds', 300) as number;
+			const staticData = this.getWorkflowStaticData('node') as IDataObject;
+			const seen = pruneSeen(staticData[SEEN_KEY], Date.now() / 1000 - windowSeconds);
 			const key = `${deliveryId}@${signedAt}`;
-			if (seen.has(key)) {
+			if (key in seen) {
 				throw new NodeOperationError(node, `Delivery ${deliveryId} was already received with this signature. Refusing a replay.`);
 			}
-			seen.add(key);
-			writeSeenSet(this, SEEN_KEY, seen);
+			seen[key] = Number(signedAt);
+			staticData[SEEN_KEY] = seen;
 		}
 
 		const response: IWebhookResponseData = { workflowData: [[{ json: body }]] };
@@ -197,6 +233,36 @@ export class LoomCycleHookCall implements INodeType {
 		if (respond === 'onReceived') response.webhookResponse = {};
 		return response;
 	}
+}
+
+/**
+ * The seen (delivery_id@t → t) record, minus every pair signed before `cutoff`:
+ * such a pair already fails the timestamp window, so it cannot be replayed.
+ * Bounded by the delivery rate times the window, never by evicting live pairs.
+ */
+function pruneSeen(raw: unknown, cutoff: number): Record<string, number> {
+	const out: Record<string, number> = {};
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+	for (const [key, t] of Object.entries(raw as Record<string, unknown>)) {
+		if (typeof t === 'number' && t >= cutoff) out[key] = t;
+	}
+	return out;
+}
+
+function parseSignedBody(raw: Buffer): IDataObject | undefined {
+	try {
+		const parsed: unknown = JSON.parse(raw.toString('utf8'));
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as IDataObject) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function parseList(raw: string): string[] {
+	return (raw ?? '')
+		.split(',')
+		.map((v) => v.trim())
+		.filter((v) => v.length > 0);
 }
 
 function firstHeader(value: string | string[] | undefined): string {
