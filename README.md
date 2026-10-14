@@ -118,6 +118,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 All three triggers use n8n's **polling** framework (`poll()`), scheduled by n8n's Poll Times — no in-node timers (n8n Cloud forbids timer primitives in community nodes). Detection latency is the poll interval.
 - **LoomCycle: Change Event** — the one genuinely **event-driven** trigger here (RFC CD Part C; requires loomcycle ≥ v1.54 and `LOOMCYCLE_MEMORY_CHANGES_ENABLED=1`). loomcycle POSTs HMAC-signed batches to this node's webhook URL on every memory / document write, so it needs no polling. Events are **value-free** — each carries the *coordinate* of what changed, never the value — so follow it with Memory → Get Entry or Document → Get Chunk to read the current state. Signature verification **fails closed**, and because delivery is at-least-once with a persisted cursor on the loomcycle side, the node dedupes on the monotonic `seq`. Subscriptions are operator-yaml only: add a `change_subscriptions:` entry pointing `callback_url` at the Production webhook URL.
 
+- **LoomCycle: Hook Call** — **n8n as the policy behind a loomcycle hook** (loomcycle ≥ v1.113 for signed calls). Point a HookDef's webhook URL here and the workflow decides each call: deny or rewrite a tool call, add context, keep an agent working or hold its answer for review, release or drop a channel message. Signatures are verified **fail-closed** with the LoomCycle Secret API credential, inside a replay window, and each signed delivery is accepted once. See [Hook policy in n8n](#hook-policy-in-n8n).
 - **LoomCycle: Review Pending** — polls for runs whose answer is **held for review** (loomcycle ≥ v1.113), so a person can rule on it with **Run → Review**. A rejected answer that comes back revised fires again.
 - **LoomCycle: Run Completed** — polls for agent runs that have reached a terminal state (completed / failed / cancelled / rejected), deduping via workflow static data. Filterable by status + `parentAgentId`.
 - **LoomCycle: Channel Message** — polls a channel each tick: `auto-ack` (at-most-once, `subscribeChannel` poll-once) or `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
@@ -241,6 +242,25 @@ The other direction: the agent has *finished*, and a person decides whether its 
 
 A hold nobody rules on before `expiresAt` ends the run as `rejected` (`review_expired`) — an unreviewed answer is never approved by default. *Review Time Limit* sets the window.
 
+## Hook policy in n8n
+
+A loomcycle hook can ask an n8n workflow what to do. This puts the policy for agent actions on the n8n canvas, where it can call anything n8n integrates with: an allowlist sheet, a ticketing system, a human approval in Slack.
+
+1. **Share a secret.** Create a **LoomCycle Secret API** credential. Run **LoomCycle Credential → Create or Rotate** with it under a name, say `n8n-hook-signing`. Leave *Send It To* on *Anywhere*, or restrict it to the trigger's https URL: a compare-only credential cannot sign.
+2. **Add the trigger.** Add **LoomCycle: Hook Call** to a workflow, select the same LoomCycle Secret API credential, and copy its Production URL.
+3. **Define the hook.** In **LoomCycle Hook → Create**: Body *Webhook*, URL = that Production URL, Signing Credential = `$cred:n8n-hook-signing`, and the event (for example `pre` with *Match Tools* `WebFetch`). Choose *Fail Mode*: *closed* if a failed or slow answer must stop the call.
+4. **Attach it.** Name the hook in an agent definition's `hooks:`, on a team state, or on one run (**Run → Spawn → Hooks**).
+5. **Answer.** By default the last node's first item is the answer:
+   - `{}` allows;
+   - `{"deny": {"text": "…"}}` blocks a tool call;
+   - `{"decision": "deny", "reason": "…"}` stops a run before it starts;
+   - `{"decision": "hold", "reason": "…"}` on `agent_stop` holds the answer for review;
+   - `{"additional_context": "…"}` adds guidance.
+   
+   The trigger's notice lists every event's answers. Use *Respond: Immediately* for observe-only events such as `run_end`.
+
+Answer within the hook's timeout: 5 s by default, 60 s at most. A private-network n8n URL must be on the loomcycle host's `LOOMCYCLE_HOOKS_PRIVATE_HOST_ALLOWLIST`, and *Allowed URLs* on a credential take https only.
+
 ## Local development install
 
 Want to install from the local checkout for development?
@@ -329,6 +349,7 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Channel publish hooks | **v1.99** | Channel → Publish Hooks (`LOOMCYCLE_CHANNEL_HOOKS=1`) |
 | Team delivery for schedules and webhooks · schedule overlap policy | **v1.104 · v1.105** | Schedule / Webhook → Each Fire / Each Delivery |
 | Schedule state / run-now / pause / resume · webhook `$cred:` verification + forge providers | **v1.113** | Schedule runtime ops; Webhook → Verification |
+| **Signed hook deliveries** (`X-Loomcycle-Signature`, body `delivery_id`) | **v1.113** | LoomCycle: Hook Call trigger (unsigned calls only with Verify Signature off) |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
