@@ -6,25 +6,30 @@ import {
 	AuthError,
 	BackpressureError,
 	ChannelCursorRegressionError,
-	HookNotFoundError,
+	InsufficientScopeError,
 	InvalidArgumentError,
 	LoomcycleError,
 	NotFoundError,
 	NotPausedError,
 	PauseNotConfiguredError,
 	PerUserQuotaExhaustedError,
+	PromptTooLargeError,
+	RateLimitedError,
+	RequestTooLargeError,
 	SessionBusyError,
 	SessionNotFoundError,
 	SnapshotNotFoundError,
 	SnapshotTooLargeError,
 	SnapshotVersionError,
 	SubstrateToolRefusedError,
+	TokenLimitExceededError,
 	UnavailableError,
 } from '@loomcycle/client';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 import type { INode } from 'n8n-workflow';
 
-import { redactBearerFragments, wrapLoomcycleError } from '../../../nodes/LoomCycle/helpers/errors';
+import { loomcycleErrorFields, redactBearerFragments, wrapLoomcycleError } from '../../../nodes/LoomCycle/helpers/errors';
+import { RunFailedError } from '../../../nodes/LoomCycle/helpers/streaming';
 
 const NODE: INode = {
 	id: 'n',
@@ -95,12 +100,9 @@ describe('wrapLoomcycleError', () => {
 		expect((wrapped as NodeApiError).httpCode).toBe('404');
 	});
 
-	it('maps SnapshotNotFoundError + HookNotFoundError + generic NotFoundError → 404', () => {
+	it('maps SnapshotNotFoundError + generic NotFoundError → 404', () => {
 		expect(
 			(wrapLoomcycleError(makeLoomcycleError(SnapshotNotFoundError, 'x', 404), NODE) as NodeApiError).httpCode,
-		).toBe('404');
-		expect(
-			(wrapLoomcycleError(makeLoomcycleError(HookNotFoundError, 'x', 404), NODE) as NodeApiError).httpCode,
 		).toBe('404');
 		expect((wrapLoomcycleError(makeLoomcycleError(NotFoundError, 'x', 404), NODE) as NodeApiError).httpCode).toBe(
 			'404',
@@ -245,5 +247,89 @@ describe('wrapLoomcycleError', () => {
 		};
 		expect(wrapped.httpCode).toBe('429');
 		expect(wrapped.message).toContain('unknown');
+	});
+	// loomcycle v1.113 (#1782): a hard token budget is no longer a
+	// BackpressureError. It must never read as "busy, retry with backoff".
+	it('maps TokenLimitExceededError to a non-retryable budget message, not backpressure', () => {
+		const err = new TokenLimitExceededError('token budget exhausted', {
+			status: 429,
+			code: 'token_limit_exceeded',
+			scope: 'tenant',
+			scopeId: 'acme',
+			used: 1200,
+			limit: 1000,
+			window: 'month',
+		});
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & { description?: string };
+		expect(wrapped.httpCode).toBe('429');
+		expect(wrapped.message).toContain('tenant acme');
+		expect(wrapped.message).toContain('1200 of 1000');
+		expect(wrapped.message).not.toMatch(/backpressure/i);
+		expect(wrapped.description).toContain('Retrying will not help');
+	});
+
+	it('maps RateLimitedError with the server\'s retry window', () => {
+		const err = new RateLimitedError('rate limited', { status: 429, code: 'rate_limited', retryAfterMs: 12000 });
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & { description?: string };
+		expect(wrapped.message).toContain('rate limit');
+		expect(wrapped.description).toContain('12s');
+	});
+
+	it('maps InsufficientScopeError to a message naming the missing scope', () => {
+		const err = new InsufficientScopeError('insufficient scope', {
+			status: 403,
+			code: 'insufficient_scope',
+			requiredScope: 'llm:gateway',
+		});
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & { description?: string };
+		expect(wrapped.httpCode).toBe('403');
+		expect(wrapped.message).toContain('"llm:gateway"');
+		expect(wrapped.description).toContain('llm:gateway');
+	});
+
+	it('maps PromptTooLargeError and RequestTooLargeError before the snapshot 413', () => {
+		const prompt = wrapLoomcycleError(new PromptTooLargeError('too big', { status: 413 }), NODE);
+		const request = wrapLoomcycleError(new RequestTooLargeError('too big', { status: 413 }), NODE);
+		expect(prompt.message).toBe('Prompt too large for the model');
+		expect(request.message).toBe('Request too large');
+		expect(prompt.message).not.toMatch(/snapshot/i);
+	});
+
+	it('adds the remedy for a restricted token to the generic mapping', () => {
+		const err = new LoomcycleError('restricted', { status: 403, code: 'restricted_token' });
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeApiError & { description?: string };
+		expect(wrapped.description).toContain('run endpoints');
+	});
+
+	it('maps a failed run with its error_info classification', () => {
+		const err = new RunFailedError('model refused', {
+			category: 'validation',
+			is_retryable: false,
+			description: 'The prompt was rejected.',
+		});
+		const wrapped = wrapLoomcycleError(err, NODE) as NodeOperationError & { description?: string };
+		expect(wrapped).toBeInstanceOf(NodeOperationError);
+		expect(wrapped.message).toBe('Run failed: model refused');
+		expect(wrapped.description).toContain('validation');
+		expect(wrapped.description).toContain('will not help');
+	});
+});
+
+describe('loomcycleErrorFields', () => {
+	it('exposes code and retryable for continue-on-fail output', () => {
+		expect(loomcycleErrorFields(new BackpressureError('busy', { status: 429, code: 'queue_full' }))).toEqual({
+			code: 'queue_full',
+			retryable: true,
+		});
+		expect(loomcycleErrorFields(new TokenLimitExceededError('x', { status: 429 }))).toEqual({ retryable: false });
+	});
+
+	it('exposes a failed run\'s classification, and nothing when it is unclassified', () => {
+		expect(loomcycleErrorFields(new RunFailedError('x', { category: 'transient', is_retryable: true }))).toEqual({
+			retryable: true,
+			errorCategory: 'transient',
+		});
+		expect(loomcycleErrorFields(new RunFailedError('x'))).toEqual({});
+		expect(loomcycleErrorFields(new Error('x'))).toEqual({});
 	});
 });

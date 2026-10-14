@@ -2,6 +2,37 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] — 2026-10-15
+
+**Major release.** Catches the nodes up to loomcycle **v1.113** (`@loomcycle/client` `^1.55.0` → `^1.113.0`). Phase 0 of the v1.113 catch-up: the breaking upstream changes, and two triggers/filters that silently returned nothing.
+
+### Breaking
+
+- **The Hook node now manages hook definitions (HookDef, RFC DK).** loomcycle v1.97 removed global hook registration (`POST /v1/hooks`, `registerHook` / `listHooks` / `deleteHook`) and dropped its table, so the `Register` / `List` / `Delete` operations no longer had anything to call. They are removed. The node's new operations: `Create` / `Fork` / `Get` / `List Names` / `List Versions` / `Promote` / `Retire` / `Verify` / `Delete`. A saved workflow that used a removed operation shows it as an invalid value; pick a new operation and fill its fields.
+  - A HookDef fires on nothing by itself: name it in an agent definition's `hooks:` (or a `tools[]` entry), on a team state, or on a run.
+  - **Create registers only when the definition changed** (`ensureHookDef`). A HookDef create is not content-addressed, so a workflow that re-ran a plain create would add an identical version every time. Turn off *Only If Changed* to always mint one.
+  - **Signing Credential** (loomcycle ≥ v1.113): a webhook body names a stored credential as `$cred:<name>`, and every call carries `X-Loomcycle-Signature`. A literal secret is refused before the request is sent.
+
+### Fixed
+
+- **`LoomCycle: Run Completed` never fired.** The poll listed a user's runs without a status filter, and loomcycle answers that with **running runs only** (true since at least v0.34), so no completed, failed or cancelled run ever matched. It now asks for each selected terminal status by name — one request per status, which works on every loomcycle version. Confirmed against a local v1.113: a failed run is absent from the unfiltered listing and present under `status=failed`. The regression tests model the server's real behaviour and fail on the old code.
+- **`Run → List Agents` with Status "All" returned running runs only**, for the same reason. "All" now sends `status=all` (accepted since loomcycle v0.4), including for saved workflows.
+- **A token-budget refusal no longer reads as backpressure.** `TokenLimitExceededError` is its own error now, with who hit the budget, usage and limit, and "retrying will not help". Rate limits (`RateLimitedError`) show the server's retry window. Oversized prompts and requests are no longer reported as "snapshot too large".
+- **A missing scope is named.** loomcycle v1.113 answers a scope 403 with the scope it wanted (`InsufficientScopeError`); the error now says, for example, *missing the "llm:gateway" scope*. This also covers the **Chat Model**, where an isolated user token without `llm:gateway` used to fail with only "insufficient scope".
+- **MCP Server header guidance.** From loomcycle v1.113 a runtime MCP server definition holding `${LOOMCYCLE_*}` is refused when dialed unless an admin saved it. The node, its notice and the README now recommend `$cred:<name>`.
+
+### Added
+
+- **Spawn reports review holds.** A run held for an operator's verdict (`review: true`, or an `agent_stop` hook answering "hold") ends the drain with `awaitingReview: { expiresAt, round, heldBy }` instead of blocking until the hold expires. Approve or reject it from outside the execution.
+- **Spawn reports `deduplicated: true`** when an idempotency key was already held (loomcycle ≥ v1.106).
+- **Failed runs say whether retrying can help.** The run's `error_info` classification appears in the error description.
+- **Continue-on-fail output carries `code` and `retryable`** (and `errorCategory` for a failed run), so a workflow can branch on whether to retry instead of parsing the message.
+- `Rejected` and `Configured` statuses on Run Completed and List Agents.
+
+### Verified
+
+Typecheck, lint and 429 tests pass. The compiled nodes were driven against a **locally built loomcycle v1.113.0** (Hook create twice → `changed: false`; a bad fork → `code: tool_refused, retryable: false`; the trigger emitting failed runs, then deduping). **Not yet verified in a live n8n.**
+
 ## [3.16.1] — 2026-08-18
 
 **Patch.** Guards against a silent data-orphaning trap found by a real workflow.

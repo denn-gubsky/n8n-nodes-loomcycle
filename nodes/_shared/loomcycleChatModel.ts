@@ -1,4 +1,5 @@
 import { BaseChatModel, getParametersJsonSchema } from '@n8n/ai-node-sdk';
+import { InsufficientScopeError } from '@loomcycle/client';
 import type {
 	ChatModelConfig,
 	ContentText,
@@ -219,6 +220,16 @@ function toLoomcycleTool(tool: Tool): LLMTool | null {
 // ---- Error redaction ----
 
 function redactedError(err: unknown): Error {
+	// loomcycle v1.112 gates the LLM gateway behind the `llm:gateway` scope; an
+	// isolated user token without it is refused. Name the missing grant so the
+	// AI Agent's error says what to fix rather than "insufficient scope".
+	if (err instanceof InsufficientScopeError && err.requiredScope) {
+		const wrapped = new Error(
+			`The LoomCycle credential's token is missing the "${err.requiredScope}" scope. Ask a loomcycle operator for a token that carries it.`,
+		);
+		(wrapped as Error & { cause?: unknown }).cause = err;
+		return wrapped;
+	}
 	const message = redactBearerFragments((err as Error).message ?? 'unknown loomcycle error');
 	const wrapped = new Error(message);
 	(wrapped as Error & { cause?: unknown }).cause = err;

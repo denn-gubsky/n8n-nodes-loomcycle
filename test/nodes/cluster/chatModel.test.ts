@@ -120,6 +120,16 @@ describe('LoomcycleChatModel — @n8n/ai-node-sdk model over the LLM gateway', (
 			/\[REDACTED\]/,
 		);
 	});
+
+	it('names the missing llm:gateway scope when the gateway refuses the token', async () => {
+		const { InsufficientScopeError } = await import('@loomcycle/client');
+		mockClient.llmChat.mockRejectedValue(
+			new InsufficientScopeError('insufficient scope', { status: 403, requiredScope: 'llm:gateway' }),
+		);
+		await expect(model().generate([{ role: 'user', content: [{ type: 'text', text: 'x' }] }])).rejects.toThrow(
+			/missing the "llm:gateway" scope/,
+		);
+	});
 });
 
 describe('LoomCycleChatModel — n8n Chat Model sub-node', () => {

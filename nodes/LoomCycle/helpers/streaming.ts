@@ -1,4 +1,4 @@
-import type { AgentEvent, LimitInfo, Usage } from '@loomcycle/client';
+import type { AgentEvent, ErrorInfo, LimitInfo, Usage } from '@loomcycle/client';
 
 /**
  * Result of draining a runStreaming() iterable into a single n8n output.
@@ -37,15 +37,48 @@ export interface RunDrainResult {
 	 * branch on its existence rather than comparing counts.
 	 */
 	limits?: LimitInfo[];
+	/**
+	 * Set when the run finished an answer and is HELD for an operator's verdict
+	 * (`review: true`, or an agent_stop hook that answered "hold"; loomcycle ≥
+	 * v1.93). The run detaches and waits; approve or reject it with Run → Review
+	 * before `expiresAt`, after which it ends `rejected`.
+	 */
+	awaitingReview?: { expiresAt?: string; round?: number; heldBy?: string };
+	/**
+	 * True when the spawn's idempotency key was already held: nothing new
+	 * started, and this result is the existing run's (loomcycle ≥ v1.106).
+	 */
+	deduplicated?: boolean;
+}
+
+/**
+ * A run that ended in an `error` frame. Carries the substrate's classification
+ * (`error_info`, RFC DA) so the error shown in n8n says whether retrying can
+ * help, and continue-on-fail output can branch on it. `errorInfo` is absent for
+ * a failure the runtime did not classify — never read that as "not retryable
+ * for a known reason".
+ */
+export class RunFailedError extends Error {
+	readonly errorInfo?: ErrorInfo;
+	constructor(message: string, errorInfo?: ErrorInfo) {
+		super(message);
+		this.name = 'RunFailedError';
+		this.errorInfo = errorInfo;
+	}
 }
 
 /**
  * Drain an async-iterable of AgentEvents into a structured summary.
  *
  * `event: error` frames (or any frame with `is_error: true`) cause the
- * function to throw — the action node's `wrapLoomcycleError` catches and
- * surfaces them as NodeApiError. Other event types fold into the compact
- * summary returned.
+ * function to throw a {@link RunFailedError} — the action node's
+ * `wrapLoomcycleError` catches and surfaces it. Other event types fold into the
+ * compact summary returned.
+ *
+ * An `awaiting_review` frame always ends the drain: the run is held for a
+ * verdict nobody inside this execution can give, and the substrate detaches a
+ * held run from its stream, so waiting on would block the node until the hold
+ * expires.
  *
  * `stopOnAwaitingInput` (RFC AI): an interactive run parks at `end_turn` and
  * its stream stays open indefinitely awaiting the next operator turn — a plain
@@ -67,6 +100,9 @@ export async function drainRunStream(
 	let runId: string | undefined;
 	let awaitingInput: boolean | undefined;
 	let errorMessage: string | undefined;
+	let errorInfo: ErrorInfo | undefined;
+	let awaitingReview: RunDrainResult['awaitingReview'];
+	let deduplicated: boolean | undefined;
 	const limits: LimitInfo[] = [];
 
 	for await (const ev of stream) {
@@ -85,9 +121,11 @@ export async function drainRunStream(
 		if (ev.type === 'agent') {
 			if (ev.agent_id) agentId = ev.agent_id;
 			if (ev.run_id) runId = ev.run_id;
+			if (ev.deduplicated === true) deduplicated = true;
 		}
 		if (ev.type === 'error' || ev.is_error === true) {
 			errorMessage = ev.error ?? 'unknown error from loomcycle';
+			if (ev.error_info) errorInfo = ev.error_info;
 		}
 		if (ev.type === 'limit' && ev.limit) {
 			limits.push(ev.limit);
@@ -96,10 +134,19 @@ export async function drainRunStream(
 			awaitingInput = true;
 			if (opts.stopOnAwaitingInput) break;
 		}
+		if (ev.type === 'awaiting_review') {
+			const hold = ev.awaiting_review ?? {};
+			awaitingReview = {
+				...(hold.expires_at ? { expiresAt: hold.expires_at } : {}),
+				...(typeof hold.round === 'number' ? { round: hold.round } : {}),
+				...(hold.held_by ? { heldBy: hold.held_by } : {}),
+			};
+			break;
+		}
 	}
 
 	if (errorMessage) {
-		throw new Error(errorMessage);
+		throw new RunFailedError(errorMessage, errorInfo);
 	}
 
 	return {
@@ -111,5 +158,7 @@ export async function drainRunStream(
 		runId,
 		awaitingInput,
 		...(limits.length > 0 ? { limits } : {}),
+		...(awaitingReview ? { awaitingReview } : {}),
+		...(deduplicated ? { deduplicated } : {}),
 	};
 }
