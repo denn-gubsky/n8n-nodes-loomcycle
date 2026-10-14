@@ -68,6 +68,54 @@ describe('LoomCycle resource=run', () => {
 			expect(json.runId).toBe('r1');
 		});
 
+		it('stops at a review hold and reports when it expires, without waiting for a verdict', async () => {
+			mockClient.runStreaming.mockReturnValue(
+				asAsyncIterable([
+					{ type: 'agent', agent_id: 'a1', run_id: 'r1' },
+					{ type: 'text', text: 'Draft answer' },
+					{ type: 'awaiting_review', awaiting_review: { round: 1, expires_at: '2026-10-15T07:00:00Z' } },
+					// Anything after the hold must not be consumed: the run detaches.
+					{ type: 'text', text: 'SHOULD NOT APPEAR' },
+				] as AgentEvent[]),
+			);
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({ params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' } });
+			const json = (await node.execute.call(ctx))[0][0].json as Record<string, unknown>;
+			expect(json.finalText).toBe('Draft answer');
+			expect(json.runId).toBe('r1');
+			expect(json.awaitingReview).toEqual({ expiresAt: '2026-10-15T07:00:00Z', round: 1 });
+		});
+
+		it('marks a spawn whose idempotency key was already held as deduplicated', async () => {
+			mockClient.runStreaming.mockReturnValue(
+				asAsyncIterable([
+					{ type: 'agent', agent_id: 'a1', run_id: 'r1', deduplicated: true },
+					{ type: 'text', text: 'earlier answer' },
+					{ type: 'done', stop_reason: 'end_turn' },
+				] as AgentEvent[]),
+			);
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({ params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' } });
+			const json = (await node.execute.call(ctx))[0][0].json as Record<string, unknown>;
+			expect(json.deduplicated).toBe(true);
+		});
+
+		it('surfaces a failed run\'s classification in continue-on-fail output', async () => {
+			mockClient.runStreaming.mockReturnValue(
+				asAsyncIterable([
+					{ type: 'agent', agent_id: 'a1', run_id: 'r1' },
+					{ type: 'error', error: 'provider down', error_info: { category: 'transient', is_retryable: true } },
+				] as AgentEvent[]),
+			);
+			const node = new LoomCycle();
+			const ctx = makeExecuteContext({
+				params: { resource: 'run', operation: 'spawn', agent: 'a', prompt: 'q' },
+				continueOnFail: true,
+			});
+			const json = (await node.execute.call(ctx))[0][0].json as Record<string, unknown>;
+			expect(json).toEqual({ error: 'Run failed: provider down', retryable: true, errorCategory: 'transient' });
+		});
+
 		it('forwards credential-default user_tier when per-node parameter is empty', async () => {
 			mockClient.runStreaming.mockReturnValue(asAsyncIterable(fakeSuccessfulRunEvents({ text: 'hi' })));
 			const node = new LoomCycle();
@@ -350,7 +398,7 @@ describe('LoomCycle resource=run', () => {
 				credentials: { userId: 'cred-u' },
 			});
 			const result = await node.execute.call(ctx);
-			expect(mockClient.listUserAgents).toHaveBeenCalledWith('cred-u', undefined);
+			expect(mockClient.listUserAgents).toHaveBeenCalledWith('cred-u', { status: 'all' });
 			expect((result[0][0].json as Record<string, unknown>).agents).toHaveLength(1);
 		});
 

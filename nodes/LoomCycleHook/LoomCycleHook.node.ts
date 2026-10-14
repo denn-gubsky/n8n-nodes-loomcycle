@@ -1,12 +1,15 @@
 import type { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 import { executeLoomCycle } from '../LoomCycle/execute';
+import { loadHookDefNames } from '../LoomCycle/helpers/loadOptions';
 import { hookOps } from '../LoomCycle/descriptions';
 
 /**
- * LoomCycle Hook — pre/post-tool webhook registration (register / list /
- * delete). The callback URL typically points at an n8n Webhook trigger.
- * Per-resource action node split from the former umbrella node (v2.0.0).
+ * LoomCycle Hook — HookDef admin (RFC DK, loomcycle ≥ v1.97): create, fork,
+ * promote, retire, verify and delete reusable hook definitions. A webhook body
+ * typically points at a LoomCycle: Hook Call trigger, so an n8n workflow
+ * answers the hook. Replaces the register / list / delete operations, whose
+ * wire API loomcycle v1.97 removed.
  */
 export class LoomCycleHook implements INodeType {
 	description: INodeTypeDescription = {
@@ -16,7 +19,7 @@ export class LoomCycleHook implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Register loomcycle pre/post-tool webhook callbacks over HTTP',
+		description: 'Define reusable loomcycle hooks that gate tool calls, runs and channel messages',
 		defaults: { name: 'LoomCycle Hook' },
 		inputs: ['main'],
 		outputs: ['main'],
@@ -25,6 +28,12 @@ export class LoomCycleHook implements INodeType {
 			{ displayName: 'Resource', name: 'resource', type: 'hidden', default: 'hook' },
 			...hookOps,
 		],
+	};
+
+	methods = {
+		loadOptions: {
+			loadHookDefNames,
+		},
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {

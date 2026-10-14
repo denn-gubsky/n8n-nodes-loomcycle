@@ -43,7 +43,7 @@ export async function runPollLoop(this: ITriggerFunctions, opts: PollOptions): P
 export async function pollOnce(this: ITriggerFunctions, opts: PollOptions): Promise<void> {
 	// listUserAgents takes a single `status` filter; iterate the
 	// operator's selection. When empty, ask for all terminal statuses.
-	const wanted = opts.statuses.length > 0 ? opts.statuses : (['completed', 'failed', 'cancelled'] as AgentStatus[]);
+	const wanted = opts.statuses.length > 0 ? opts.statuses : (['completed', 'failed', 'cancelled', 'rejected'] as AgentStatus[]);
 
 	const seen = readSeenSet(this, SEEN_KEY);
 	const fresh: Agent[] = [];

@@ -2,6 +2,30 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-10-15
+
+**Major release (full edition).** Mirrors slim-edition **4.0.0**: the nodes build against loomcycle **v1.113** (`@loomcycle/client` `^1.55.0` → `^1.113.0`). Phase 0 of the v1.113 catch-up.
+
+### Breaking — mirrored from slim 4.0.0
+
+- **The Hook node now manages hook definitions (HookDef, RFC DK).** loomcycle v1.97 removed global hook registration (`POST /v1/hooks`) and dropped its table, so `Register` / `List` / `Delete` are removed. New operations: `Create` (registers only when the definition changed) / `Fork` / `Get` / `List Names` / `List Versions` / `Promote` / `Retire` / `Verify` / `Delete`, with an optional **Signing Credential** (`$cred:<name>`, loomcycle ≥ v1.113). A saved workflow that used a removed operation shows it as an invalid value; pick a new operation and fill its fields.
+
+### Fixed
+
+- **`Run → List Agents` with Status "All" returned running runs only** — a listing with no status holds running runs. "All" now sends `status=all`. *(The slim edition's Run Completed trigger had the same trap and never fired; this edition's poll fallback already asked per status, so only `Rejected` was missing here.)*
+- **Errors from adapter 1.113:** a token budget no longer reads as backpressure; rate limits show the retry window; a missing scope is named, including in the **Chat Model** (`llm:gateway`); oversized prompts and requests are no longer "snapshot too large".
+- **MCP header guidance moves to `$cred:<name>`** on the MCP Server node and the **MCP Server Tool** sub-node: from v1.113 a runtime definition holding `${LOOMCYCLE_*}` is refused when dialed unless an admin saved it. The sub-node's log line now says so.
+
+### Added
+
+- `Rejected` status on Run Completed (SSE and polling) and List Agents; `Configured` on List Agents.
+- Spawn reports a review hold (`awaitingReview`) instead of blocking, and `deduplicated` for a held idempotency key.
+- A failed run's `error_info` reaches the error; continue-on-fail rows carry `code` / `retryable` / `errorCategory`.
+
+### Verified
+
+Typecheck, lint and 532 tests (528 passed, 4 skipped). The shared executor was exercised live against a locally built loomcycle v1.113.0 on the slim branch. **Not yet verified in a live n8n.**
+
 ## [2.16.0] — 2026-08-18
 
 **Minor release (full edition).** Mirrors slim-edition **3.15.0** — the governance and multi-tenancy surface. **33 → 37 nodes.**

@@ -31,7 +31,7 @@ export class LoomCycleRunCompleted implements INodeType {
 		icon: 'file:LoomCycleRunCompleted.svg',
 		group: ['trigger'],
 		version: 1,
-		description: 'Fires when a loomcycle agent run reaches a terminal state (completed/failed/cancelled)',
+		description: 'Fires when a loomcycle agent run reaches a terminal state (completed/failed/cancelled/rejected)',
 		defaults: { name: 'LoomCycle: Run Completed' },
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [],
@@ -54,6 +54,7 @@ export class LoomCycleRunCompleted implements INodeType {
 					{ name: 'Cancelled', value: 'cancelled' },
 					{ name: 'Completed', value: 'completed' },
 					{ name: 'Failed', value: 'failed' },
+					{ name: 'Rejected', value: 'rejected', description: 'A run whose held answer was rejected at review, or whose review expired (loomcycle ≥ v1.93)' },
 				],
 				description: 'Which terminal statuses fire this trigger',
 			},

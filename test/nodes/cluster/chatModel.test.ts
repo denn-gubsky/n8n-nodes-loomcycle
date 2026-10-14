@@ -357,4 +357,12 @@ describe('LoomcycleChatModel — LangChain wrapper around the LLM gateway', () =
 		await expect(model.invoke([new HumanMessage('hi')])).rejects.toThrow(/\[REDACTED\]/);
 		await expect(model.invoke([new HumanMessage('hi')])).rejects.not.toThrow(/sk-leaked-fake-token-xyz123/);
 	});
+
+	it('names the missing llm:gateway scope when the gateway refuses the token', async () => {
+		const { InsufficientScopeError } = await import('@loomcycle/client');
+		mockClient.llmChat.mockRejectedValue(
+			new InsufficientScopeError('insufficient scope', { status: 403, requiredScope: 'llm:gateway' }),
+		);
+		await expect(buildModel().invoke([new HumanMessage('hi')])).rejects.toThrow(/missing the "llm:gateway" scope/);
+	});
 });

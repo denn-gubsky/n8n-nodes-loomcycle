@@ -32,7 +32,7 @@ describe('pollOnce', () => {
 		expect(listUserAgents).toHaveBeenCalledTimes(2);
 	});
 
-	it('falls back to all 3 terminal statuses when statuses is empty', async () => {
+	it('falls back to all 4 terminal statuses, rejected included, when statuses is empty', async () => {
 		const listUserAgents = vi.fn().mockResolvedValue([]);
 		await pollOnce.call(ctx as unknown as LoopThis, {
 			client: { listUserAgents } as unknown as Parameters<typeof pollOnce>[0]['client'],
@@ -41,7 +41,13 @@ describe('pollOnce', () => {
 			intervalMs: 0,
 			signal: new AbortController().signal,
 		});
-		expect(listUserAgents).toHaveBeenCalledTimes(3);
+		expect(listUserAgents).toHaveBeenCalledTimes(4);
+		expect(listUserAgents.mock.calls.map((c) => (c[1] as { status: string }).status)).toEqual([
+			'completed',
+			'failed',
+			'cancelled',
+			'rejected',
+		]);
 	});
 
 	it('emits new rows + dedups across invocations', async () => {

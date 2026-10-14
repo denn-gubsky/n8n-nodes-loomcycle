@@ -140,13 +140,13 @@ export class LoomCycleMcpServerTool implements INodeType {
 								default: '',
 								required: true,
 								description:
-									'Supports `${LOOMCYCLE_FOO}` env-var substitution + `${run.user_bearer:-FALLBACK}` per-run substitution',
+									'Reference a stored loomcycle credential as `$cred:&lt;name&gt;`, never the secret itself. `${run.user_bearer:-FALLBACK}` substitutes the run\'s own bearer.',
 							},
 						],
 					},
 				],
 				description:
-					'Headers attached to every MCP call. Use template strings (`${LOOMCYCLE_FOO_TOKEN}`) — plaintext credentials never travel through this wire path.',
+					'Headers attached to every MCP call. Put secrets in a loomcycle credential and write `$cred:&lt;name&gt;` — plaintext credentials never travel through this wire path. `${LOOMCYCLE_*}` env references work only when an admin token registers the server (loomcycle ≥ v1.113).',
 			},
 			{
 				displayName: 'Loomcycle Agent',
@@ -268,7 +268,9 @@ async function ensureAndCollectMcpCaptures(
 	const envVars = extractEnvVarsFromHeaders(headersParam);
 	if (envVars.length > 0) {
 		this.logger.info?.(
-			`[LoomCycleMcpServerTool] MCP server ${mcpName} registered. Required env vars on loomcycle: ${envVars.join(', ')}`,
+			// loomcycle v1.113 refuses ${NAME} in a runtime definition a non-admin
+			// saved, so these only resolve when this credential is an admin token.
+			`[LoomCycleMcpServerTool] MCP server ${mcpName} registered with env references (${envVars.join(', ')}). They resolve only if an admin token registered it and the vars exist on the loomcycle host; otherwise use $cred:<name>.`,
 		);
 	}
 

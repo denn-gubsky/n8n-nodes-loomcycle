@@ -315,3 +315,26 @@ export async function loadTeams(this: ILoadOptionsFunctions): Promise<INodePrope
 		return [failedToLoadOption('teams', err)];
 	}
 }
+
+/**
+ * HookDef names for the Hook node's dropdowns (loomcycle ≥ v1.113). A name with
+ * no active version is still listed — Promote and Retire act on its versions —
+ * but badged, because attaching it by name resolves to nothing.
+ */
+export async function loadHookDefNames(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	try {
+		const client = await getClient(this);
+		const resp = await client.listHookDefNames();
+		const entries = [...(resp.names ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+		if (entries.length === 0) {
+			return [{ name: '— no hooks defined; create one or type a name manually —', value: '' }];
+		}
+		return entries.map((h) => {
+			const parts = [`latest v${h.latest_version}`, `${h.version_count} version${h.version_count === 1 ? '' : 's'}`];
+			if (!h.active_def_id) parts.push('no active version');
+			return { name: h.name, value: h.name, description: parts.join(' · ') };
+		});
+	} catch (err) {
+		return [failedToLoadOption('hooks', err)];
+	}
+}
