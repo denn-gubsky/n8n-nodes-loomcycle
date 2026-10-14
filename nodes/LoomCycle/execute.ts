@@ -16,6 +16,8 @@ import type {
 	HistoryToolInput,
 	InterruptStatus,
 	CreateSnapshotOptions,
+	DecisionAnswer,
+	DecisionQuestion,
 	DocumentToolInput,
 	EventHooks,
 	LLMChatMessage,
@@ -122,6 +124,10 @@ export async function executeLoomCycle(
 				row = await executeUsage(ctx, client, operation, i);
 			} else if (resource === 'history') {
 				row = await executeHistory(ctx, client, operation, i);
+			} else if (resource === 'decision') {
+				row = await executeDecision(ctx, client, operation, i);
+			} else if (resource === 'evaluation') {
+				row = await executeEvaluation(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -2224,6 +2230,154 @@ async function withStructuredResult(
 	const run = await client.getRun(result.runId);
 	const structured = run.result?.structured;
 	return structured ? { ...result, structured } : result;
+}
+
+/**
+ * Decision models (RFC EB, loomcycle ≥ v1.107). The questions can be built from
+ * fields or given as the raw object; either way the server validates them
+ * (2–26 options, 1–64 questions). The output keeps the full answers and adds
+ * `values`, one plain value per question, so an IF / Switch node can branch
+ * without digging into probabilities.
+ */
+async function executeDecision(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const node = ctx.getNode();
+	if (operation === 'listModels') {
+		return (await client.listDecisionModels()) as unknown as IDataObject;
+	}
+	if (operation !== 'decide') {
+		throw new NodeOperationError(node, `Unknown decision operation: ${operation}`);
+	}
+
+	const state = parseObjectField(ctx.getNodeParameter('state', i, '{}'), node);
+	if (!state) {
+		throw new NodeOperationError(node, 'State must be a non-empty JSON object: it is what the questions are about.', {
+			itemIndex: i,
+		});
+	}
+
+	let questions: Record<string, DecisionQuestion>;
+	if (ctx.getNodeParameter('questionsMode', i, 'fields') === 'json') {
+		const parsed = parseObjectField(ctx.getNodeParameter('questionsJson', i, '{}'), node);
+		if (!parsed) throw new NodeOperationError(node, 'Questions (JSON) must be a non-empty object.', { itemIndex: i });
+		questions = parsed as Record<string, DecisionQuestion>;
+	} else {
+		questions = buildDecisionQuestions(ctx.getNodeParameter('questions', i, {}), node, i);
+	}
+
+	const model = (ctx.getNodeParameter('decisionModel', i, '') as string).trim();
+	const resp = await client.decide({ ...(model ? { model } : {}), state, questions });
+	return { ...resp, values: decisionValues(resp.answers) } as unknown as IDataObject;
+}
+
+function buildDecisionQuestions(raw: unknown, node: INode, itemIndex: number): Record<string, DecisionQuestion> {
+	const rows = ((raw ?? {}) as { question?: Array<Record<string, unknown>> }).question ?? [];
+	if (rows.length === 0) throw new NodeOperationError(node, 'Add at least one question.', { itemIndex });
+	const out: Record<string, DecisionQuestion> = {};
+	for (const row of rows) {
+		const name = String(row.name ?? '').trim();
+		const instructions = String(row.instructions ?? '').trim();
+		if (!name || !instructions) {
+			throw new NodeOperationError(node, 'Every question needs a name and the question itself.', { itemIndex });
+		}
+		if (name in out) throw new NodeOperationError(node, `Two questions are named "${name}".`, { itemIndex });
+		const lines = String(row.criteria ?? '')
+			.split('\n')
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0);
+		const type = row.type as DecisionQuestion['type'];
+		if (type === 'score') {
+			out[name] = { type, instructions, criteria: lines };
+		} else if (type === 'noul') {
+			const criteria: { true?: string; false?: string } = {};
+			for (const line of lines) {
+				const [key, ...rest] = line.split(':');
+				const k = key.trim().toLowerCase();
+				const v = rest.join(':').trim();
+				if (v && (k === 'yes' || k === 'true')) criteria.true = v;
+				if (v && (k === 'no' || k === 'false')) criteria.false = v;
+			}
+			out[name] = Object.keys(criteria).length > 0 ? { type, instructions, criteria } : { type, instructions };
+		} else {
+			const criteria: Record<string, string | null> = {};
+			for (const line of lines) {
+				const at = line.indexOf(':');
+				const option = (at >= 0 ? line.slice(0, at) : line).trim();
+				const meaning = at >= 0 ? line.slice(at + 1).trim() : '';
+				if (option) criteria[option] = meaning || null;
+			}
+			out[name] = { type: 'choice', instructions, criteria };
+		}
+	}
+	return out;
+}
+
+/** One plain value per answer: the chosen option, the yes probability, or the score. */
+function decisionValues(answers: Record<string, DecisionAnswer> | undefined): Record<string, string | number> {
+	const out: Record<string, string | number> = {};
+	for (const [name, answer] of Object.entries(answers ?? {})) {
+		if (answer.type === 'choice') out[name] = answer.choice;
+		else if (answer.type === 'noul') out[name] = answer.noul;
+		else if (answer.type === 'score') out[name] = answer.score;
+	}
+	return out;
+}
+
+/**
+ * Evaluations (loomcycle ≥ v1.113 over HTTP). A tenant-level token is needed:
+ * a user or member token may only submit its own run's score from inside the
+ * run. `score` 0 is a real score, so it is always sent.
+ */
+async function executeEvaluation(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const node = ctx.getNode();
+	if (operation === 'submit') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const score = ctx.getNodeParameter('score', i) as number;
+		const fields = ctx.getNodeParameter('evaluationFields', i, {}) as IDataObject;
+		const dimensionRows = ((fields.dimensions ?? {}) as { dimension?: Array<{ name?: string; value?: number }> }).dimension;
+		const dimensions: Record<string, number> = {};
+		for (const row of dimensionRows ?? []) {
+			if (row.name && typeof row.value === 'number') dimensions[row.name] = row.value;
+		}
+		const judgement = parseObjectField(fields.judgement, node);
+		const rationale = typeof fields.rationale === 'string' ? fields.rationale.trim() : '';
+		const resp = await client.submitEvaluation(runId, score, {
+			...(Object.keys(dimensions).length > 0 ? { dimensions } : {}),
+			...(judgement ? { judgement } : {}),
+			...(rationale ? { rationale } : {}),
+		});
+		return resp as unknown as IDataObject;
+	}
+	if (operation === 'get') {
+		return (await client.getEvaluation(ctx.getNodeParameter('evalId', i) as string)) as unknown as IDataObject;
+	}
+	if (operation === 'listForRun' || operation === 'listForDef') {
+		const maxRows = ctx.getNodeParameter('maxRows', i, 100) as number;
+		const limit = maxRows > 0 ? { limit: maxRows } : {};
+		const resp =
+			operation === 'listForRun'
+				? await client.listEvaluationsForRun(ctx.getNodeParameter('runId', i) as string, limit)
+				: await client.listEvaluationsForDef(ctx.getNodeParameter('defId', i) as string, limit);
+		return resp as unknown as IDataObject;
+	}
+	if (operation === 'aggregate') {
+		const includeLineage = ctx.getNodeParameter('includeLineage', i, false) as boolean;
+		const resp = await client.aggregateEvaluations(
+			ctx.getNodeParameter('defId', i) as string,
+			includeLineage ? { includeLineage } : undefined,
+		);
+		return resp as unknown as IDataObject;
+	}
+	throw new NodeOperationError(node, `Unknown evaluation operation: ${operation}`);
 }
 
 // ---- Local helpers ----
