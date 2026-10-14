@@ -201,6 +201,20 @@ export const memoryOps: INodeProperties[] = [
 		displayOptions: { show: { resource: ['memory'], operation: ['search'] } },
 		options: [
 			{
+				displayName: 'Said After',
+				name: 'whenFrom',
+				type: 'dateTime',
+				default: '',
+				description: 'Only memory observed after this moment, with a few days of slack (loomcycle ≥ v1.66)',
+			},
+			{
+				displayName: 'Said Before',
+				name: 'whenTo',
+				type: 'dateTime',
+				default: '',
+				description: 'Only memory observed before this moment, with a few days of slack',
+			},
+			{
 				displayName: 'Sources (Comma-Separated)',
 				name: 'sources',
 				type: 'string',
@@ -214,6 +228,13 @@ export const memoryOps: INodeProperties[] = [
 				default: 10,
 				typeOptions: { minValue: 1, maxValue: 50 },
 				description: 'Max number of ranked hits to return (server caps at 50)',
+			},
+			{
+				displayName: 'True At',
+				name: 'whenAsOf',
+				type: 'dateTime',
+				default: '',
+				description: 'Only facts that were true at this instant (their valid-from / valid-until interval). A hard filter, unlike Said After / Before.',
 			},
 		],
 	},

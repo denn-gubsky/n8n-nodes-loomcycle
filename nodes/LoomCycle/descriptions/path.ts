@@ -112,6 +112,25 @@ export const pathOps: INodeProperties[] = [
 		description: 'Whether to list all descendants (List) or remove a path that has descendants (Remove). Remove refuses a non-empty path without this.',
 	},
 
+	// ---- List: paging (loomcycle ≥ v1.76) ----
+	{
+		displayName: 'Page Size',
+		name: 'pageSize',
+		type: 'number',
+		default: 500,
+		typeOptions: { minValue: 1, maxValue: 5000 },
+		displayOptions: { show: { resource: ['path'], operation: ['ls'] } },
+		description: 'How many entries to return (at most 5 000). A truncated answer carries next_cursor.',
+	},
+	{
+		displayName: 'Cursor',
+		name: 'cursor',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['path'], operation: ['ls'] } },
+		description: 'The next_cursor of a previous page. Empty = the first page.',
+	},
+
 	// ---- List: kind filter ----
 	{
 		displayName: 'Kind Filter',

@@ -542,6 +542,24 @@ async function executeMemory(
 			}
 			input.sources = sources;
 		}
+		// Time window (loomcycle ≥ v1.66). Empty fields are left out: an absent
+		// bound is "no bound", which a zero instant would not be.
+		const when: NonNullable<MemorySearchInput['when']> = {};
+		const iso = (raw: unknown, label: string): string | undefined => {
+			if (raw === undefined || raw === null || raw === '') return undefined;
+			const ms = Date.parse(String(raw));
+			if (Number.isNaN(ms)) {
+				throw new NodeOperationError(ctx.getNode(), `${label} is not a valid date/time: "${String(raw)}".`, { itemIndex: i });
+			}
+			return new Date(ms).toISOString();
+		};
+		const from = iso(searchOptions.whenFrom, 'Said After');
+		const to = iso(searchOptions.whenTo, 'Said Before');
+		const asOf = iso(searchOptions.whenAsOf, 'True At');
+		if (from) when.from = from;
+		if (to) when.to = to;
+		if (asOf) when.as_of = asOf;
+		if (Object.keys(when).length > 0) input.when = when;
 		const resp = await client.memorySearch(input);
 		return resp as unknown as IDataObject;
 	}
@@ -615,6 +633,9 @@ async function executeChannel(
 		}
 		if (settings.publisher) opts.publisher = settings.publisher as string;
 		if (settings.period) opts.period = settings.period as string;
+		if (settings.hold === true) opts.hold = true;
+		const publishHooks = Array.isArray(settings.publishHooks) ? (settings.publishHooks as string[]).filter((h) => h) : [];
+		if (publishHooks.length > 0) opts.hooks = { channel_publish: publishHooks };
 		const resp = await client.createChannel(opts);
 		return resp as unknown as IDataObject;
 	}
@@ -638,6 +659,14 @@ async function executeChannel(
 		if (typeof settings.maxMessages === 'number' && settings.maxMessages > 0) {
 			opts.max_messages = settings.maxMessages;
 		}
+		// Unlike the numbers above, these are sent whenever the operator added
+		// the field: hold false is a real request, and an empty hook selection
+		// means "remove them" (the server takes {} for that).
+		if (typeof settings.hold === 'boolean') opts.hold = settings.hold;
+		if (Array.isArray(settings.publishHooks)) {
+			const hooks = (settings.publishHooks as string[]).filter((h) => h);
+			opts.hooks = hooks.length > 0 ? { channel_publish: hooks } : {};
+		}
 		const resp = await client.updateChannel(name, opts);
 		return resp as unknown as IDataObject;
 	}
@@ -647,6 +676,25 @@ async function executeChannel(
 		await client.deleteChannel(name);
 		// Adapter returns void on success; surface a consistent ok envelope
 		return { ok: true, name } as IDataObject;
+	}
+
+	if (operation === 'release') {
+		// Held channels (loomcycle ≥ v1.77): hand stored messages over, oldest
+		// first. Needs publish rights on the channel.
+		const name = ctx.getNodeParameter('channel', i) as string;
+		const scope = ctx.getNodeParameter('scope', i, 'global') as string;
+		const count = ctx.getNodeParameter('releaseCount', i, 1) as number;
+		const opts: { count?: number; scope?: string; scope_id?: string } = { scope };
+		if (typeof count === 'number' && count > 0) opts.count = count;
+		if (scope === 'user') {
+			const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+			const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
+			if (!userId) {
+				throw new NodeOperationError(ctx.getNode(), 'User ID is required to release a per-user channel.', { itemIndex: i });
+			}
+			opts.scope_id = userId;
+		}
+		return (await client.releaseChannel(name, opts)) as unknown as IDataObject;
 	}
 
 	if (operation === 'purgeChannel') {
@@ -858,6 +906,17 @@ async function executeScheduleDef(
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
+	// Runtime ops (loomcycle ≥ v1.113) address one schedule by def_id and act
+	// on its state, not its definition.
+	if (operation === 'listAll') return (await client.listAllSchedules()) as unknown as IDataObject;
+	if (operation === 'getState' || operation === 'runNow' || operation === 'pause' || operation === 'resume') {
+		const scheduleDefId = ctx.getNodeParameter('scheduleDefId', i) as string;
+		if (operation === 'getState') return (await client.getScheduleState(scheduleDefId)) as unknown as IDataObject;
+		if (operation === 'runNow') return (await client.runScheduleNow(scheduleDefId)) as unknown as IDataObject;
+		if (operation === 'pause') return (await client.pauseSchedule(scheduleDefId)) as unknown as IDataObject;
+		return (await client.resumeSchedule(scheduleDefId)) as unknown as IDataObject;
+	}
+
 	const input: SubstrateToolInput = { op: operation as SubstrateToolInput['op'] };
 
 	const name = ctx.getNodeParameter('name', i, '') as string;
@@ -890,14 +949,34 @@ async function executeScheduleDef(
 
 		if (operation === 'create') {
 			const schedule = ctx.getNodeParameter('schedule', i) as string;
-			const agent = ctx.getNodeParameter('agent', i) as string;
-			const prompt = ctx.getNodeParameter('prompt', i) as string;
+			const delivery = ctx.getNodeParameter('delivery', i, 'run') as string;
 			const extra = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
-			const treatPromptAsUntrusted = extra.treatPromptAsUntrusted === true;
 
 			overlay.schedule = schedule;
-			overlay.agent = agent;
-			overlay.prompt = buildSegments(prompt, treatPromptAsUntrusted);
+			// `delivery` is sent only when it is not the default, so an agent
+			// schedule's request is unchanged from before the field existed.
+			if (delivery === 'channel') {
+				overlay.delivery = 'channel';
+				overlay.channel = ctx.getNodeParameter('deliveryChannel', i) as string;
+			} else if (delivery === 'team') {
+				overlay.delivery = 'team';
+				overlay.team = ctx.getNodeParameter('deliveryTeam', i) as string;
+				const teamInput = (ctx.getNodeParameter('teamInput', i, '') as string).trim();
+				if (teamInput) overlay.input = teamInput;
+				const vars = collectNameValuePairs(ctx.getNodeParameter('teamVars', i, {}), 'variable');
+				if (Object.keys(vars).length > 0) overlay.vars = vars;
+			} else {
+				const treatPromptAsUntrusted = extra.treatPromptAsUntrusted === true;
+				overlay.agent = ctx.getNodeParameter('agent', i) as string;
+				overlay.prompt = buildSegments(ctx.getNodeParameter('prompt', i) as string, treatPromptAsUntrusted);
+			}
+			// A channel tick starts no run, so the server refuses an overlap
+			// policy there; a stale collection value must not make it refuse.
+			const policy = extra.concurrencyPolicy;
+			if (delivery !== 'channel' && (policy === 'forbid' || policy === 'allow' || policy === 'replace')) {
+				overlay.concurrency_policy = policy;
+			}
+			if (typeof extra.maxFires === 'number' && extra.maxFires > 0) overlay.max_fires = extra.maxFires;
 			if (extra.userId) overlay.user_id = extra.userId as string;
 			if (extra.userTier) overlay.user_tier = extra.userTier as string;
 			if (extra.timezone) overlay.timezone = extra.timezone as string;
@@ -978,12 +1057,10 @@ async function executeWebhookDef(
 		}
 
 		if (operation === 'create') {
-			const agent = ctx.getNodeParameter('agent', i, '') as string;
-			const channel = ctx.getNodeParameter('channel', i, '') as string;
 			const enabled = ctx.getNodeParameter('enabled', i, true) as boolean;
-			if (agent) overlay.agent = agent;
-			if (channel) overlay.channel = channel;
 			overlay.enabled = enabled;
+			applyWebhookDelivery(ctx, i, overlay);
+			applyWebhookVerification(ctx, i, overlay);
 		}
 
 		// v0.21: static (trusted) metadata + per-delivery credentials parity
@@ -1238,6 +1315,11 @@ async function executePath(
 		if (ctx.getNodeParameter('recursive', i, false) as boolean) input.recursive = true;
 		const kindFilter = ctx.getNodeParameter('kindFilter', i, '') as string;
 		if (kindFilter) input.kind_filter = kindFilter;
+		// Paging (loomcycle ≥ v1.76); the server default is 500.
+		const pageSize = ctx.getNodeParameter('pageSize', i, 500) as number;
+		if (typeof pageSize === 'number' && pageSize > 0 && pageSize !== 500) input.limit = pageSize;
+		const cursor = (ctx.getNodeParameter('cursor', i, '') as string).trim();
+		if (cursor) input.cursor = cursor;
 	}
 
 	if (operation === 'rm') {
@@ -2480,6 +2562,65 @@ async function executeCredential(
 	return (await client.createCredential(input)) as unknown as IDataObject;
 }
 
+/**
+ * A webhook does exactly one thing per delivery, and the server needs to be
+ * told which: `channel` alone is read as an agent spawn with no agent and
+ * refused. Before 4.5.0 the node sent agent and/or channel without
+ * `delivery`, so a channel webhook could not be created; a saved workflow
+ * that set only a channel is still read as a channel webhook here.
+ */
+function applyWebhookDelivery(ctx: IExecuteFunctions, i: number, overlay: Record<string, unknown>): void {
+	const agent = ctx.getNodeParameter('agent', i, '') as string;
+	const channel = ctx.getNodeParameter('channel', i, '') as string;
+	let delivery = ctx.getNodeParameter('webhookDelivery', i, 'spawn') as string;
+	if (delivery === 'spawn' && !agent && channel) delivery = 'channel';
+
+	if (delivery === 'channel') {
+		overlay.delivery = 'channel';
+		overlay.channel = channel;
+	} else if (delivery === 'team') {
+		overlay.delivery = 'team';
+		overlay.team = ctx.getNodeParameter('webhookTeam', i) as string;
+		const vars = collectNameValuePairs(ctx.getNodeParameter('webhookTeamVars', i, {}), 'variable');
+		if (Object.keys(vars).length > 0) overlay.vars = vars;
+	} else if (agent) {
+		// Spawn is the server default, so `delivery` is left out and an agent
+		// webhook's request is what it always was.
+		overlay.agent = agent;
+	}
+}
+
+/**
+ * Verification fields layered onto any `auth` the Advanced Overlay JSON
+ * carries, so the structured fields win key by key. The secret is always a
+ * `$cred:` reference (loomcycle ≥ v1.113); a literal is refused here before it
+ * can reach the request.
+ */
+function applyWebhookVerification(ctx: IExecuteFunctions, i: number, overlay: Record<string, unknown>): void {
+	const v = ctx.getNodeParameter('verification', i, {}) as IDataObject;
+	const auth: Record<string, unknown> =
+		overlay.auth && typeof overlay.auth === 'object' && !Array.isArray(overlay.auth)
+			? { ...(overlay.auth as Record<string, unknown>) }
+			: {};
+	const secret = typeof v.verificationCredential === 'string' ? v.verificationCredential.trim() : '';
+	if (secret) {
+		if (!secret.startsWith('$cred:')) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				'Verification Credential must name a stored loomcycle credential as $cred:<name>, not hold the secret itself. Store the value with the LoomCycle Credential node first.',
+				{ itemIndex: i },
+			);
+		}
+		auth.secret = secret;
+	}
+	if (v.authKind === 'hmac' || v.authKind === 'bearer' || v.authKind === 'none') auth.kind = v.authKind;
+	if (Object.keys(auth).length > 0) overlay.auth = auth;
+
+	if (v.provider === 'github' || v.provider === 'gitea' || v.provider === 'gitlab') overlay.provider = v.provider;
+	const events = parseCsv(v.events as string);
+	if (events !== undefined) overlay.events = events;
+}
+
 // ---- Local helpers ----
 
 /**
@@ -2819,6 +2960,10 @@ async function executeHistory(
 		// than sent as an empty format.
 		const format = str('format');
 		if (format) input.format = format;
+		// Turn paging (loomcycle ≥ v1.98); omitted = the whole chat, as before.
+		const paging = ctx.getNodeParameter('turnPaging', i, {}) as IDataObject;
+		if (typeof paging.maxTurns === 'number' && paging.maxTurns > 0) input.limit = paging.maxTurns;
+		if (typeof paging.skipTurns === 'number' && paging.skipTurns > 0) input.offset = paging.skipTurns;
 	}
 
 	if (operation === 'list' || operation === 'search') {
@@ -2835,9 +2980,11 @@ async function executeHistory(
 	}
 
 	if (operation === 'search') {
-		// Title-only substring match — see the field description. Named `query`
-		// on the wire despite not being a content search.
+		// Title substring by default. `match: content` (loomcycle ≥ v1.80) searches
+		// what was said and needs an embedder; it is sent only when chosen, so a
+		// title search's request is unchanged.
 		input.query = ctx.getNodeParameter('query', i) as string;
+		if (ctx.getNodeParameter('match', i, 'title') === 'content') input.match = 'content';
 	}
 
 	if (operation === 'related') {

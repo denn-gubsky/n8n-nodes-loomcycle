@@ -1,7 +1,7 @@
 import type { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 import { executeLoomCycle } from '../LoomCycle/execute';
-import { loadAgents } from '../LoomCycle/helpers/loadOptions';
+import { loadAgents, loadTeams } from '../LoomCycle/helpers/loadOptions';
 import { scheduleDefOps } from '../LoomCycle/descriptions';
 
 /**
@@ -31,6 +31,7 @@ export class LoomCycleSchedule implements INodeType {
 	methods = {
 		loadOptions: {
 			loadAgents,
+			loadTeams,
 		},
 	};
 
