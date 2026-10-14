@@ -2,6 +2,26 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] — 2026-10-15
+
+**Minor release.** Phase 2 of the v1.113 catch-up: the Team node catches up to loomcycle's team arc (v1.89–v1.113).
+
+### Added
+
+- **Version lifecycle:** `Promote`, `Retire` (or un-retire), `List Versions`, and `Verify`, against a hash or against an **unsaved graph**, which returns every problem a save would hit, each with a JSON path. `Create` / `Fork` gain a **Promote** toggle (Create on, Fork off) and Fork a **Parent Def ID**.
+  - This closes the README's long-standing gap where a fork could not be put in force from n8n. The in-node notice saying so is gone.
+- **A walk is a run:** `Run` can start it detached (*Wait for the Walk to Finish* off) and returns its `run_id`. New ops take that `run_id`: `Cancel Walk`, `List Walk Runs` (the walk plus every member, paged), and `Get` / `Set Breakpoints`. An empty breakpoint set clears them, since the set replaces the armed one.
+- **Run options:** **Variables** (the team's declared `${var.*}`; undeclared names are refused), **Hold States for Review**, **Breakpoints**, **Review Time Limit**, **Idempotency Key** (a retried start returns the same walk, `deduplicated: true`), and **Ask a Human at the Iteration Cap**.
+- **Team channels from outside the team:** `List Channels` (with message and held counts), `Peek Channel`, `Release Channel`.
+
+### Changed
+
+- `Create` and `Fork` now send `promote` explicitly. Their defaults match the server's, so existing workflows behave the same.
+
+### Verified against a local loomcycle v1.113.0
+
+Verify-draft, create, fork (unpromoted), promote, versions, a synchronous walk with a variable, a detached walk retried with the same key (same `run_id`, `deduplicated`), walk runs, channels, retire, an undeclared variable refused (`tool_refused`, `retryable: false`) and delete, all through the compiled node. Breakpoints answer only for a live walk (404 `no_live_walk` once it ended). **Not yet verified in a live n8n.**
+
 ## [4.1.0] — 2026-10-15
 
 **Minor release.** Phase 1 of the v1.113 catch-up: the run controls loomcycle added between v1.82 and v1.113. **32 → 33 nodes.**

@@ -73,10 +73,11 @@ describe('LoomCycle resource=team', () => {
 				},
 			});
 			const result = await node.execute.call(ctx);
-			expect(mockClient.createTeam).toHaveBeenCalledWith('triage', {
-				...GRAPH,
-				description: 'first cut',
-			});
+			expect(mockClient.createTeam).toHaveBeenCalledWith(
+				'triage',
+				{ ...GRAPH, description: 'first cut' },
+				{ promote: true },
+			);
 			expect(result[0][0].json).toMatchObject({ def_id: 'tdf_1', promoted: true });
 		});
 
@@ -90,9 +91,9 @@ describe('LoomCycle resource=team', () => {
 			expect(mockClient.createTeam.mock.calls[0][1]).not.toHaveProperty('description');
 		});
 
-		// Verified live: a fork lands promoted:false, so it stays unreachable by
-		// name. The node surfaces the response verbatim so an operator can see
-		// that and grab the def_id.
+		// Verified live: a fork lands promoted:false unless asked otherwise, so it
+		// stays unreachable by name until promoted. The node surfaces the
+		// response verbatim so an operator can see that and grab the def_id.
 		it('Fork surfaces the unpromoted response verbatim', async () => {
 			mockClient.forkTeam.mockResolvedValue({ def_id: 'tdf_2', version: 2, promoted: false });
 			const node = new LoomCycle();
@@ -105,7 +106,7 @@ describe('LoomCycle resource=team', () => {
 				},
 			});
 			const result = await node.execute.call(ctx);
-			expect(mockClient.forkTeam).toHaveBeenCalledWith('triage', GRAPH);
+			expect(mockClient.forkTeam).toHaveBeenCalledWith('triage', GRAPH, { promote: false });
 			expect(result[0][0].json).toMatchObject({ def_id: 'tdf_2', promoted: false });
 		});
 
