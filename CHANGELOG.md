@@ -2,6 +2,22 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] — 2026-10-15
+
+**Minor release (full edition).** Mirrors slim-edition **4.1.0** — Phase 1 of the v1.113 catch-up, the run controls. **39 → 40 nodes.**
+
+### Added — mirrored from slim 4.1.0
+
+- **Run → Spawn: per-run settings** — Model (chat-alias dropdown), Provider, Tier, Effort, Max Tokens, Max Iterations, **Output Schema** (returned as `structured`), **Tool Choice**, **Hold for Review** + Review Time Limit, **Idempotency Key**, **Max Wall Time**, **Context Mode**, **Max Context Tokens**, **Hooks** (each HookDef attached under its own event) and **No Trace**.
+- **Run: ten new operations** — Get Run, List Children, Review, Retune, Get Run Config, Delete Run Tree, Create / Update / Start / Delete Draft.
+- **LoomCycle: Review Pending** trigger (poll; loomcycle ≥ v1.113).
+
+### Full edition notes
+
+- **Wait for Completion** already treats any non-running status as the end, so a `rejected` run ends the wait, and a run held for review keeps waiting until it is ruled on. Its description now lists `rejected`.
+
+Typecheck, lint and tests pass. The shared executor was exercised live on the slim branch against a local loomcycle v1.113.0. **Not yet verified in a live n8n.**
+
 ## [3.0.0] — 2026-10-15
 
 **Major release (full edition).** Mirrors slim-edition **4.0.0**: the nodes build against loomcycle **v1.113** (`@loomcycle/client` `^1.55.0` → `^1.113.0`). Phase 0 of the v1.113 catch-up.
