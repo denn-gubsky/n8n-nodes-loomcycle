@@ -2,6 +2,35 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] — 2026-10-15
+
+**Minor release.** Phase 4 of the v1.113 catch-up: loomcycle's credential store from n8n. This closes the "env-var mirror" gap the package documented since v1.x: a secret no longer has to be copied by hand into loomcycle's environment. **36 nodes, 2 credential types.**
+
+### Added
+
+- **LoomCycle Credential** node — `Create or Rotate` / `Get` / `List` / `Delete`.
+  - The value is read from a **LoomCycle Secret API** credential, never from a node parameter, so it stays out of the workflow JSON and the execution data. Outputs are metadata only, and a test asserts the secret appears in no output, error included.
+  - *Send It To* exposes the three meanings of `allowed_urls`: no restriction (or keep on rotate), only these https URLs, and nowhere (compare-only).
+  - *Expires At* is sent as RFC 3339; loomcycle enforces it from v1.113.
+- **LoomCycle Secret API** credential type: one password field. The Hook Call trigger (a later phase) uses the same credential to verify signed hook deliveries.
+
+### Changed
+
+- The Hook node's *Signing Credential* and the MCP Server node's header notice now point at the Credential node. The signing description also says which credentials can sign.
+
+### Verified against a local loomcycle v1.113.0
+
+Through the compiled nodes:
+- An unrestricted credential, an https-restricted one and a compare-only one were created; List shows their URL policies.
+- A HookDef was created signing with `$cred:` of the stored credential.
+- An expiry in the past was refused, and delete worked.
+
+Two findings are now in the field descriptions:
+- **Allowed URLs must be https.**
+- **An admin token's HookDef create accepts any signing credential**, so a compare-only or non-covering one shows up only when a call is signed.
+
+**Not yet verified in a live n8n.**
+
 ## [4.3.0] — 2026-10-15
 
 **Minor release.** Phase 3 of the v1.113 catch-up: two judgement primitives. **33 → 35 nodes.**

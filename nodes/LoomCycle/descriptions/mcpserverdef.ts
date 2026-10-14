@@ -228,7 +228,7 @@ export const mcpServerDefOps: INodeProperties[] = [
 		default: '',
 		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create'] } },
 		description:
-			'Store the secret once in loomcycle as a credential and write `$cred:&lt;name&gt;` in the header; loomcycle resolves it on each call. Env references like `${LOOMCYCLE_FOO}` work only in a definition an admin saved: from loomcycle v1.113 one saved by any other token is refused when an agent dials it.',
+			'Store the secret once in loomcycle (LoomCycle Credential node) and write `$cred:&lt;name&gt;` in the header; loomcycle resolves it on each call. Env references like `${LOOMCYCLE_FOO}` work only in a definition an admin saved: from loomcycle v1.113 one saved by any other token is refused when an agent dials it.',
 	},
 
 	// ---- Discover tools at registration (Register / Fork) ----

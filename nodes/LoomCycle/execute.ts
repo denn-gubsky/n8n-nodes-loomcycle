@@ -128,6 +128,8 @@ export async function executeLoomCycle(
 				row = await executeDecision(ctx, client, operation, i);
 			} else if (resource === 'evaluation') {
 				row = await executeEvaluation(ctx, client, operation, i);
+			} else if (resource === 'credential') {
+				row = await executeCredential(ctx, client, operation, i);
 			} else {
 				throw new NodeOperationError(ctx.getNode(), `Unknown resource: ${resource}`);
 			}
@@ -1769,7 +1771,7 @@ async function executeHook(
 				if (!signingSecret.startsWith('$cred:')) {
 					throw new NodeOperationError(
 						node,
-						'Signing Credential must name a stored loomcycle credential as $cred:<name>, not hold the secret itself. Store the value as a loomcycle credential first, then write $cred:<that name> here.',
+						'Signing Credential must name a stored loomcycle credential as $cred:<name>, not hold the secret itself. Store the value with the LoomCycle Credential node first, then write $cred:<that name> here.',
 						{ itemIndex: i },
 					);
 				}
@@ -2378,6 +2380,79 @@ async function executeEvaluation(
 		return resp as unknown as IDataObject;
 	}
 	throw new NodeOperationError(node, `Unknown evaluation operation: ${operation}`);
+}
+
+/**
+ * loomcycle's own credential store. The secret VALUE comes from the
+ * LoomCycle Secret credential, never from a node parameter (which n8n saves in
+ * the workflow and its executions); it is handed to the adapter and nowhere
+ * else, and loomcycle never returns it. Every op's output is metadata only.
+ */
+async function executeCredential(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	operation: string,
+	i: number,
+): Promise<IDataObject> {
+	const node = ctx.getNode();
+	const scope = ctx.getNodeParameter('credentialScope', i, 'tenant') as 'tenant' | 'user';
+
+	if (operation === 'list') {
+		return (await client.listCredentials(scope)) as unknown as IDataObject;
+	}
+
+	const name = (ctx.getNodeParameter('credentialName', i) as string).trim();
+	if (!name) throw new NodeOperationError(node, 'Name is required.', { itemIndex: i });
+
+	if (operation === 'get') {
+		return (await client.getCredential({ scope, name })) as unknown as IDataObject;
+	}
+	if (operation === 'delete') {
+		return (await client.deleteCredential({ scope, name })) as unknown as IDataObject;
+	}
+	if (operation !== 'create') {
+		throw new NodeOperationError(node, `Unknown credential operation: ${operation}`);
+	}
+
+	const secret = await ctx.getCredentials('loomCycleSecretApi', i);
+	const value = typeof secret.value === 'string' ? secret.value : '';
+	if (!value) {
+		throw new NodeOperationError(node, 'The selected LoomCycle Secret credential has an empty Secret Value.', {
+			itemIndex: i,
+		});
+	}
+
+	const input: Parameters<LoomClient['createCredential']>[0] = { scope, name, value };
+	// `allowed_urls` has three meanings, so each is sent deliberately: absent =
+	// no restriction (or keep the current one on a rotate), [] = sent nowhere,
+	// a list = only there.
+	const urlPolicy = ctx.getNodeParameter('urlPolicy', i, 'keep') as string;
+	if (urlPolicy === 'none') {
+		input.allowed_urls = [];
+	} else if (urlPolicy === 'list') {
+		const urls = parseCsv(ctx.getNodeParameter('allowedUrls', i, '') as string);
+		if (!urls) {
+			throw new NodeOperationError(node, 'Add at least one https URL, or choose another Send It To option.', {
+				itemIndex: i,
+			});
+		}
+		input.allowed_urls = urls;
+	}
+
+	const fields = ctx.getNodeParameter('credentialFields', i, {}) as IDataObject;
+	if (typeof fields.username === 'string' && fields.username) input.username = fields.username;
+	if (fields.expiresAt) {
+		const ms = Date.parse(String(fields.expiresAt));
+		if (Number.isNaN(ms)) {
+			throw new NodeOperationError(node, `Expires At is not a valid date/time: "${String(fields.expiresAt)}".`, {
+				itemIndex: i,
+			});
+		}
+		// The server takes RFC 3339 only; n8n's picker gives a local-time string.
+		input.expires_at = new Date(ms).toISOString();
+	}
+
+	return (await client.createCredential(input)) as unknown as IDataObject;
 }
 
 // ---- Local helpers ----
