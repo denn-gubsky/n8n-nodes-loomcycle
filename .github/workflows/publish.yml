@@ -40,9 +40,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      # OIDC trusted publishing needs npm >= 11.5.1; Node 20 ships npm 10.
+      - run: npm install -g npm@^11.5.1
       - name: Publish (tag push = real publish; workflow_dispatch defaults to dry-run)
+        # Trusted publishing (OIDC): npm exchanges the job's id-token for a
+        # short-lived publish credential, so no NPM_TOKEN secret is read. A
+        # set-but-stale NODE_AUTH_TOKEN would be tried first, hence its removal.
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
           if [ "$DRY_RUN" = "true" ]; then
