@@ -55,16 +55,46 @@ export const scheduleDefOps: INodeProperties[] = [
 				action: 'Get a schedule definition',
 			},
 			{
+				name: 'Get State',
+				value: 'getState',
+				description: 'Read a schedule\'s runtime state: next fire, runs in flight, last status, missed slots (loomcycle ≥ v1.113)',
+				action: 'Get the state of a schedule',
+			},
+			{
+				name: 'List All',
+				value: 'listAll',
+				description: 'List every schedule, the loomcycle.yaml ones included, with its active version',
+				action: 'List all schedules',
+			},
+			{
 				name: 'List Versions',
 				value: 'list',
 				description: 'List all versions for a name (lineage tree)',
 				action: 'List schedule definition versions',
 			},
 			{
+				name: 'Pause',
+				value: 'pause',
+				description: 'Stop a schedule from firing until it is resumed',
+				action: 'Pause a schedule',
+			},
+			{
+				name: 'Resume',
+				value: 'resume',
+				description: 'Let a paused schedule fire again',
+				action: 'Resume a schedule',
+			},
+			{
 				name: 'Retire',
 				value: 'retire',
 				description: 'Mark a def_id (or active row for a name) as retired',
 				action: 'Retire a schedule definition',
+			},
+			{
+				name: 'Run Now',
+				value: 'runNow',
+				description: 'Fire a schedule once on the scheduler\'s next tick; the regular cadence continues',
+				action: 'Run a schedule now',
 			},
 		],
 		default: 'list',
@@ -93,6 +123,18 @@ export const scheduleDefOps: INodeProperties[] = [
 		description: 'Specific def_id to retire. Leave empty to retire the active version of the name above.',
 	},
 
+	// ---- Def ID for the runtime ops (Get State / Run Now / Pause / Resume) ----
+	{
+		displayName: 'Def ID',
+		name: 'scheduleDefId',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'def_…',
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['getState', 'runNow', 'pause', 'resume'] } },
+		description: 'The schedule\'s active def_id, as Get, List All or Create return it',
+	},
+
 	// ---- Parent Def ID (Fork) ----
 	{
 		displayName: 'Parent Def ID',
@@ -116,6 +158,70 @@ export const scheduleDefOps: INodeProperties[] = [
 		description: 'Standard cron expression the loomcycle sweeper fires on. Validated server-side — an invalid expression is refused with a parse error.',
 	},
 
+	// ---- Delivery (Create) ----
+	{
+		displayName: 'Each Fire',
+		name: 'delivery',
+		type: 'options',
+		default: 'run',
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'] } },
+		options: [
+			{ name: 'Runs an Agent', value: 'run', description: 'Spawn the agent below with the prompt below' },
+			{ name: 'Publishes to a Channel', value: 'channel', description: 'Post a tick to a channel and start no run (loomcycle ≥ v1.77)' },
+			{ name: 'Starts a Team Walk', value: 'team', description: 'Start a detached walk of a team (loomcycle ≥ v1.104)' },
+		],
+		description: 'What the schedule does each time it fires',
+	},
+	{
+		displayName: 'Channel',
+		name: 'deliveryChannel',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['channel'] } },
+		description: 'The channel each fire publishes a tick to',
+	},
+	{
+		displayName: 'Team Name or ID',
+		name: 'deliveryTeam',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'loadTeams' },
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['team'] } },
+		description:
+			'The team each fire walks. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+	},
+	{
+		displayName: 'Team Input',
+		name: 'teamInput',
+		type: 'string',
+		typeOptions: { rows: 3 },
+		default: '',
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['team'] } },
+		description: 'The task handed to the walk\'s entry state on each fire',
+	},
+	{
+		displayName: 'Team Variables',
+		name: 'teamVars',
+		type: 'fixedCollection',
+		placeholder: 'Add Variable',
+		default: {},
+		typeOptions: { multipleValues: true },
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['team'] } },
+		options: [
+			{
+				name: 'variable',
+				displayName: 'Variable',
+				values: [
+					{ displayName: 'Name', name: 'name', type: 'string', default: '', required: true },
+					{ displayName: 'Value', name: 'value', type: 'string', default: '' },
+				],
+			},
+		],
+		description: 'Literal values for the team\'s declared variables on every walk',
+	},
+
 	// ---- Agent (Create) — reuse the library dropdown ----
 	{
 		displayName: 'Agent Name or ID',
@@ -124,7 +230,7 @@ export const scheduleDefOps: INodeProperties[] = [
 		typeOptions: { loadOptionsMethod: 'loadAgents' },
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'] } },
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['run'] } },
 		description:
 			'Agent the schedule spawns on each fire — merged from loomcycle.yaml + AgentDef registry. Or specify a name dynamically via an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 	},
@@ -137,7 +243,7 @@ export const scheduleDefOps: INodeProperties[] = [
 		typeOptions: { rows: 4 },
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'] } },
+		displayOptions: { show: { resource: ['scheduleDef'], operation: ['create'], delivery: ['run'] } },
 		description: 'Prompt sent to the agent on each scheduled fire — wrapped as a trusted-text segment',
 	},
 
@@ -233,7 +339,22 @@ export const scheduleDefOps: INodeProperties[] = [
 				type: 'number',
 				default: 0,
 				typeOptions: { minValue: 0 },
-				description: 'Max missed fires to replay after downtime. 0 = no catch-up.',
+				description:
+					'After an outage: 0 (the default) fires once for all the missed slots and records how many were missed; N (up to 1 000) replays the newest N slots, each run marked catch_up',
+			},
+			{
+				displayName: 'Concurrency Policy',
+				name: 'concurrencyPolicy',
+				type: 'options',
+				default: '',
+				options: [
+					{ name: 'Allow (Start Another)', value: 'allow' },
+					{ name: 'Default (Forbid)', value: '' },
+					{ name: 'Forbid (Skip the Slot)', value: 'forbid' },
+					{ name: 'Replace (Cancel the Running One)', value: 'replace' },
+				],
+				description:
+					'What a fire does while the previous run is still going (loomcycle ≥ v1.105). Not for channel delivery, which starts no run.',
 			},
 			{
 				displayName: 'Enabled',
@@ -241,6 +362,14 @@ export const scheduleDefOps: INodeProperties[] = [
 				type: 'boolean',
 				default: true,
 				description: 'Whether the sweeper fires this schedule. Disable to author a schedule without arming it.',
+			},
+			{
+				displayName: 'Max Fires',
+				name: 'maxFires',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'Stop after this many fires. 0 = no limit. A skipped overlapping slot does not count.',
 			},
 			{
 				displayName: 'Required Credentials (Comma-Separated)',

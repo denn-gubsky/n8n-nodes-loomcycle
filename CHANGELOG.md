@@ -2,6 +2,48 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] — 2026-10-15
+
+**Minor release.** Phase 5 of the v1.113 catch-up: what triggers a run, held channels, and paging. **Includes one bug fix found live: channel webhooks.**
+
+### Fixed
+
+- **A channel webhook could not be created from the Webhook node.** The node sent the channel without `delivery: "channel"`, and loomcycle reads that as an agent spawn with no agent and refuses it ("delivery=spawn requires agent"). Confirmed against a local v1.113. The node now sends the delivery explicitly. A saved workflow that set only a channel is read as a channel webhook, so it works without editing. The regression test fails on the old code.
+
+### Added
+
+- **Schedule**
+  - **Each Fire**: run an agent, publish to a channel (v1.77), or start a team walk with literal variables and an input (v1.104).
+  - **Concurrency Policy** (v1.105). It is dropped for a channel schedule, which the server would refuse.
+  - **Max Fires**.
+  - Runtime ops (v1.113): **List All**, **Get State**, **Run Now**, **Pause**, **Resume**.
+  - *Catch-Up Max*'s description is corrected: 0 fires once for all missed slots, it does not skip them.
+- **Webhook**
+  - **Each Delivery**: agent, channel or team. Team variables are JSONPaths into the body; unlike a schedule's, they are not literals.
+  - **Verification**: a stored `$cred:` credential (a literal is refused before sending), a method, a forge **provider** and an **events** filter (v1.113). These merge key by key onto any `auth` in the Advanced Overlay.
+- **Channel**: **Hold Messages** and **Release** (v1.77), and **Publish Hooks** (`channel_publish` HookDefs, v1.99). On Update, *Hold Messages* off and an empty hook selection are sent as given, since both are real requests.
+- **History**: Search **Match: What Was Said** (v1.80, needs an embedder), and Get **Turn Paging** (v1.98).
+- **Path**: List **Page Size** and **Cursor** (v1.76).
+- **Memory**: Search **Said After / Said Before / True At** (v1.66).
+
+### Corrected
+
+- **Version claims in Phases 0–4** (4.0.0–4.4.0), checked against the release each feature first shipped in. They are description text only; no behaviour changed.
+  - HookDef needs loomcycle ≥ **v1.96**, not v1.97. v1.97 is where the old registration API was removed.
+  - Retune and Get Run Config need **v1.83** (per-run model overrides v1.82), and Context Mode needs **v1.70**, not v1.85.
+  - A team walk has been a run since **v1.77**, not v1.101. Team variables arrived in **v1.104**, not v1.89.
+  - Team Promote / Retire / Verify have been on the adapter since **v1.77**, not v1.113 as 4.2.0 said. Only fork-with-promote and ask-at-cap are v1.113, verifying an unsaved graph is v1.105, and team channels are v1.108.
+
+### Verified against a local loomcycle v1.113.0
+
+Through the compiled nodes:
+- **Schedules:** a team schedule with variables, overlap policy and max fires; Get State, Run Now, Pause and Resume; a channel schedule with a stale policy, saved without it.
+- **Webhooks:** a channel webhook from **saved-workflow parameters** (refused before this fix); a team webhook with a JSONPath variable; a GitHub-provider webhook with an events filter, all verified via `$cred:`.
+- **Channels:** a held channel stored two publishes, Release 1 delivered one, `still_held: 1`.
+- **Paging:** Path and History paging.
+
+**Not verified:** content search, since the local server has no embedder. **Not yet verified in a live n8n.**
+
 ## [4.4.0] — 2026-10-15
 
 **Minor release.** Phase 4 of the v1.113 catch-up: loomcycle's credential store from n8n. This closes the "env-var mirror" gap the package documented since v1.x: a secret no longer has to be copied by hand into loomcycle's environment. **36 nodes, 2 credential types.**

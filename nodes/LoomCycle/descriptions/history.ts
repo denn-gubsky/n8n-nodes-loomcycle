@@ -151,6 +151,33 @@ export const historyOps: INodeProperties[] = [
 			'How to render the transcript. Pick **Conversation** when feeding a chat to a model: it strips tool traffic and runtime events, which is usually most of the tokens and none of the meaning.',
 	},
 
+	{
+		displayName: 'Turn Paging',
+		name: 'turnPaging',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['history'], operation: ['get'] } },
+		options: [
+			{
+				displayName: 'Max Turns',
+				name: 'maxTurns',
+				type: 'number',
+				default: 50,
+				typeOptions: { minValue: 1 },
+				description: 'Read at most this many turns (loomcycle ≥ v1.98). The answer says how many there are and whether more remain.',
+			},
+			{
+				displayName: 'Skip Turns',
+				name: 'skipTurns',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'Start after this many turns. Use the answer\'s next_offset for the following page.',
+			},
+		],
+	},
+
 	// ---- List / Search filters ----
 	{
 		displayName: 'Filters',
@@ -242,7 +269,19 @@ export const historyOps: INodeProperties[] = [
 		required: true,
 		displayOptions: { show: { resource: ['history'], operation: ['search'] } },
 		description:
-			'Case-insensitive substring matched against the chat TITLE. It does NOT search transcripts or summaries — a query describing what a conversation was about will return nothing. Use Related for that.',
+			'With Match "Title": a case-insensitive substring of the chat TITLE, which does not search what was said. With Match "What Was Said": the chats\' own turns are searched (loomcycle ≥ v1.80, needs an embedder on the server).',
+	},
+	{
+		displayName: 'Match',
+		name: 'match',
+		type: 'options',
+		default: 'title',
+		displayOptions: { show: { resource: ['history'], operation: ['search'] } },
+		options: [
+			{ name: 'Title', value: 'title', description: 'Substring of the chat title' },
+			{ name: 'What Was Said', value: 'content', description: 'Search the chats\' turns; needs an embedder configured on loomcycle' },
+		],
+		description: 'What the query is matched against',
 	},
 
 	// ---- Related ----
