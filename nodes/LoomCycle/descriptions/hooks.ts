@@ -223,7 +223,7 @@ export const hookOps: INodeProperties[] = [
 		placeholder: '$cred:n8n-hook-signing',
 		displayOptions: { show: { resource: ['hook'], operation: ['create'], bodyKind: ['http'] } },
 		description:
-			'A stored loomcycle credential, written as $cred:&lt;name&gt;, whose value signs every call (loomcycle ≥ v1.113). A literal secret is refused. Give the LoomCycle: Hook Call trigger the same secret value so it can reject calls that did not come from loomcycle.',
+			'A stored loomcycle credential, written as $cred:&lt;name&gt;, whose value signs every call (loomcycle ≥ v1.113). A literal secret is refused. Store it with the LoomCycle Credential node from a LoomCycle Secret credential, and give the LoomCycle: Hook Call trigger the same LoomCycle Secret so it can reject calls that did not come from loomcycle. The credential must be usable for this URL: unrestricted, or with Allowed URLs covering it (https only). A compare-only credential cannot sign; a call it cannot sign is not sent, and Fail Mode decides.',
 	},
 	{
 		displayName: 'Headers',
