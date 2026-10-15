@@ -338,3 +338,26 @@ export async function loadHookDefNames(this: ILoadOptionsFunctions): Promise<INo
 		return [failedToLoadOption('hooks', err)];
 	}
 }
+
+/**
+ * Model aliases for the per-run Model override (loomcycle ≥ v1.113). Only chat
+ * aliases can run an agent, so decision and embedder aliases are left out. An
+ * override is refused unless the agent definition allows it, so the first
+ * option leaves the agent's own model in force.
+ */
+export async function loadModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const inherit: INodePropertyOptions = { name: "Inherit (the Agent's Own Model)", value: '' };
+	try {
+		const client = await getClient(this);
+		const resp = await client.listModels();
+		const entries = Object.entries(resp.aliases ?? {})
+			.filter(([, alias]) => !alias.kind || alias.kind === 'chat')
+			.sort(([a], [b]) => a.localeCompare(b));
+		return [
+			inherit,
+			...entries.map(([name, alias]) => ({ name, value: name, description: `${alias.provider} · ${alias.model}` })),
+		];
+	} catch (err) {
+		return [inherit, failedToLoadOption('models', err)];
+	}
+}

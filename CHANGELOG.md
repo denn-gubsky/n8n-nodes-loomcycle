@@ -2,6 +2,28 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] — 2026-10-15
+
+**Minor release.** Phase 1 of the v1.113 catch-up: the run controls loomcycle added between v1.82 and v1.113. **32 → 33 nodes.**
+
+### Added
+
+- **Run → Spawn: per-run settings** (*Additional Fields*): Model (dropdown of the deployment's chat aliases), Provider, Tier, Effort, Max Tokens, Max Iterations, **Output Schema** (the parsed answer is returned as `structured`, read from the run once it ends), **Tool Choice** (mode, tool, until), **Hold for Review** + Review Time Limit, **Idempotency Key**, **Max Wall Time**, **Context Mode**, **Max Context Tokens**, **Hooks** and **No Trace**. Untouched fields send nothing, so an existing workflow's request is byte-identical.
+  - **Hooks** takes HookDef names and attaches each under the event its definition answers. The server refuses a hook listed under any other event, so the node looks the event up instead of asking you to pair them.
+- **Run: ten new operations** — `Get Run`, `List Children`, `Review`, `Retune`, `Get Run Config` (overrides / effective settings with their source / first prompt), `Delete Run Tree`, and drafts: `Create Draft`, `Update Draft`, `Start Draft`, `Delete Draft`. A draft never carries a bearer, credentials, a session or an idempotency key; Start Draft takes the bearer and credentials.
+- **LoomCycle: Review Pending** trigger (loomcycle ≥ v1.113) — fires for each run held for review. It re-checks `awaited_state` itself, because an older server ignores the filter and would return every running run. Its dedup state is the set of runs held at the last poll, so a revised answer held again fires again.
+
+### Verified against a local loomcycle v1.113.0
+
+With a deterministic code-js agent, driving the compiled nodes:
+- An output schema produced `structured`, and a repeated idempotency key returned `deduplicated: true`.
+- A held run was caught by Review Pending, then released as approved by **Retune → Hold for Review off**.
+- Reject without feedback ended a run `rejected`, which Run Completed then emitted.
+- A draft went through create, update (new prompt), start and delete-tree.
+- Retune and Get Run Config (overrides) answer for live runs only; on an ended run they 404. First Prompt works after the end.
+
+**Not yet verified in a live n8n.**
+
 ## [4.0.0] — 2026-10-15
 
 **Major release.** Catches the nodes up to loomcycle **v1.113** (`@loomcycle/client` `^1.55.0` → `^1.113.0`). Phase 0 of the v1.113 catch-up: the breaking upstream changes, and two triggers/filters that silently returned nothing.
