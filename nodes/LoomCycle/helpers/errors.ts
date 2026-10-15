@@ -7,21 +7,27 @@ import {
 	AuthError,
 	BackpressureError,
 	ChannelCursorRegressionError,
-	HookNotFoundError,
+	InsufficientScopeError,
 	InvalidArgumentError,
 	LoomcycleError,
 	NotFoundError,
 	NotPausedError,
 	PauseNotConfiguredError,
 	PerUserQuotaExhaustedError,
+	PromptTooLargeError,
+	RateLimitedError,
+	RequestTooLargeError,
 	SessionBusyError,
 	SessionNotFoundError,
 	SnapshotNotFoundError,
 	SnapshotTooLargeError,
 	SnapshotVersionError,
 	SubstrateToolRefusedError,
+	TokenLimitExceededError,
 	UnavailableError,
 } from '@loomcycle/client';
+
+import { RunFailedError } from './streaming';
 
 /**
  * Redact anything that LOOKS like a bearer token from a body string before
@@ -60,6 +66,20 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 		});
 	}
 
+	if (err instanceof InsufficientScopeError) {
+		// The token is valid but was minted without a grant this call needs
+		// (loomcycle ≥ v1.113 names it in the body). Naming the scope turns a
+		// bare 403 into a one-line fix for whoever mints tokens.
+		const scope = err.requiredScope;
+		return new NodeApiError(node, jsonifyError(err), {
+			message: scope ? `The credential's token is missing the "${scope}" scope` : 'The credential\'s token is missing a required scope',
+			description: scope
+				? `The token is valid but was minted without "${scope}". Ask a loomcycle operator for a token that carries it, then update the LoomCycle API credential.`
+				: redactBearerFragments(err.bodyText ?? 'Ask a loomcycle operator for a token with the scope this operation needs.'),
+			httpCode: '403',
+		});
+	}
+
 	if (err instanceof AgentNotFoundError) {
 		return new NodeApiError(node, jsonifyError(err), {
 			message: 'Agent not found',
@@ -79,14 +99,6 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 	if (err instanceof SnapshotNotFoundError) {
 		return new NodeApiError(node, jsonifyError(err), {
 			message: 'Snapshot not found',
-			description: redactBearerFragments(err.bodyText ?? ''),
-			httpCode: '404',
-		});
-	}
-
-	if (err instanceof HookNotFoundError) {
-		return new NodeApiError(node, jsonifyError(err), {
-			message: 'Hook not found',
 			description: redactBearerFragments(err.bodyText ?? ''),
 			httpCode: '404',
 		});
@@ -114,6 +126,31 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 			message: `Substrate ${tool}refused the operation`,
 			description: redactBearerFragments(err.bodyText ?? err.message),
 			httpCode: '422',
+		});
+	}
+
+	if (err instanceof TokenLimitExceededError) {
+		// A hard token budget. Not backpressure: retrying cannot succeed until
+		// the budget window rolls over or an operator raises the limit.
+		const who = [err.scope, err.scopeId].filter((v) => v).join(' ');
+		const usage = err.used != null && err.limit != null ? ` (${err.used} of ${err.limit} tokens` + (err.window ? ` this ${err.window})` : ')') : '';
+		return new NodeApiError(node, jsonifyError(err), {
+			message: `Token budget exhausted${who ? ` for ${who}` : ''}${usage}`,
+			description: 'Retrying will not help. Wait for the budget window to roll over, or ask a loomcycle operator to raise the limit.',
+			httpCode: '429',
+		});
+	}
+
+	if (err instanceof RateLimitedError) {
+		// The token's run-start rate (RFC EF). Checked before its parent class
+		// so the server's Retry-After reaches the operator.
+		const retryHint = err.retryAfterMs != null
+			? ` Try again in about ${Math.max(1, Math.round(err.retryAfterMs / 1000))}s.`
+			: ' Try again shortly.';
+		return new NodeApiError(node, jsonifyError(err), {
+			message: 'Run-start rate limit reached for this token',
+			description: `Too many runs were started in a short time.${retryHint}`,
+			httpCode: '429',
 		});
 	}
 
@@ -176,6 +213,24 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 		});
 	}
 
+	// PromptTooLargeError ⊂ RequestTooLargeError ⊂ SnapshotTooLargeError, so the
+	// narrower classes are tested first; otherwise every 413 reads as a snapshot.
+	if (err instanceof PromptTooLargeError) {
+		return new NodeApiError(node, jsonifyError(err), {
+			message: 'Prompt too large for the model',
+			description: redactBearerFragments(err.bodyText ?? 'Shorten the input; loomcycle never truncates it to fit.'),
+			httpCode: '413',
+		});
+	}
+
+	if (err instanceof RequestTooLargeError) {
+		return new NodeApiError(node, jsonifyError(err), {
+			message: 'Request too large',
+			description: redactBearerFragments(err.bodyText ?? ''),
+			httpCode: '413',
+		});
+	}
+
 	if (err instanceof SnapshotTooLargeError) {
 		return new NodeApiError(node, jsonifyError(err), {
 			message: 'Snapshot too large for this operation',
@@ -217,10 +272,25 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 	}
 
 	if (err instanceof LoomcycleError) {
+		const hint = err.code ? CODE_HINTS[err.code] : undefined;
+		const body = redactBearerFragments(err.bodyText ?? '');
 		return new NodeApiError(node, jsonifyError(err), {
 			message: err.message || 'Loomcycle wire error',
-			description: redactBearerFragments(err.bodyText ?? ''),
+			description: hint ? (body ? `${hint} ${body}` : hint) : body,
 			httpCode: err.status !== undefined ? String(err.status) : '500',
+		});
+	}
+
+	if (err instanceof RunFailedError) {
+		// The run itself failed (an `error` frame). Say whether retrying can
+		// help: that is the one thing an operator needs to decide next.
+		const info = err.errorInfo;
+		const parts: string[] = [];
+		if (info?.category) parts.push(`Category: ${info.category}.`);
+		if (info) parts.push(info.is_retryable ? 'Retrying may succeed.' : 'Retrying the same run will not help.');
+		if (info?.description) parts.push(info.description);
+		return new NodeOperationError(node, `Run failed: ${redactBearerFragments(err.message)}`, {
+			...(parts.length > 0 ? { description: redactBearerFragments(parts.join(' ')) } : {}),
 		});
 	}
 
@@ -243,5 +313,36 @@ function jsonifyError(err: LoomcycleError): JsonObject {
 		name: err.constructor.name,
 		message: err.message,
 		status: err.status ?? null,
+		code: err.code ?? null,
+		retryable: err.retryable,
 	};
+}
+
+/**
+ * Remedies for refusals that arrive as a plain LoomcycleError: each is keyed by
+ * the body's machine-readable `code`, which is stable where the message is not.
+ * These are the 403s a token's restrictions produce (RFC EF, loomcycle ≥ v1.112).
+ */
+const CODE_HINTS: Record<string, string> = {
+	restricted_token:
+		'This token is limited to certain agents, which also confines it to the run endpoints. Use an unrestricted token for this node.',
+	agent_not_allowed: "This token may not start this agent. Pick one of the agents the token was minted for.",
+	override_not_allowed:
+		'The agent definition or the token forbids per-run overrides. Remove the model, tier, effort and other override fields from this run.',
+};
+
+/**
+ * The fields of a wire error a workflow can branch on when the node is set to
+ * continue on fail: the stable `code` and whether the same call can succeed
+ * later (`retryable`), or for a failed run its `errorCategory`. Empty for errors
+ * that did not come from loomcycle.
+ */
+export function loomcycleErrorFields(err: unknown): { code?: string; retryable?: boolean; errorCategory?: string } {
+	if (err instanceof RunFailedError) {
+		const info = err.errorInfo;
+		if (!info) return {};
+		return { retryable: info.is_retryable, ...(info.category ? { errorCategory: info.category } : {}) };
+	}
+	if (!(err instanceof LoomcycleError)) return {};
+	return { ...(err.code ? { code: err.code } : {}), retryable: err.retryable };
 }

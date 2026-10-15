@@ -6,15 +6,20 @@ import type {
 	IPollFunctions,
 } from 'n8n-workflow';
 
+import type { Agent, AgentStatus } from '@loomcycle/client';
+
 import { getClient, getCredentialDefault } from '../LoomCycle/helpers/client';
 import { wrapLoomcycleError } from '../LoomCycle/helpers/errors';
 import { readSeenSet, writeSeenSet } from '../LoomCycle/helpers/staticData';
 
 const SEEN_KEY = 'runCompleted';
 
+const TERMINAL_STATUSES: AgentStatus[] = ['completed', 'failed', 'cancelled', 'rejected'];
+
 /**
  * `LoomCycle: Run Completed` — polling trigger that fires when a loomcycle
- * agent run reaches a terminal state (completed / failed / cancelled).
+ * agent run reaches a terminal state (completed / failed / cancelled /
+ * rejected).
  *
  * Uses n8n's `poll()` framework: n8n invokes `poll()` on the schedule the
  * operator configures (Poll Times), and each call does ONE `listUserAgents`
@@ -32,7 +37,7 @@ export class LoomCycleRunCompleted implements INodeType {
 		group: ['trigger'],
 		version: 1,
 		polling: true,
-		description: 'Fires when a loomcycle agent run reaches a terminal state (completed/failed/cancelled)',
+		description: 'Fires when a loomcycle agent run reaches a terminal state (completed/failed/cancelled/rejected)',
 		defaults: { name: 'LoomCycle: Run Completed' },
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
 		inputs: [],
@@ -55,8 +60,9 @@ export class LoomCycleRunCompleted implements INodeType {
 					{ name: 'Cancelled', value: 'cancelled' },
 					{ name: 'Completed', value: 'completed' },
 					{ name: 'Failed', value: 'failed' },
+					{ name: 'Rejected', value: 'rejected', description: 'A run whose held answer was rejected at review, or whose review expired (loomcycle ≥ v1.93)' },
 				],
-				description: 'Which terminal statuses fire this trigger',
+				description: 'Which terminal statuses fire this trigger. Empty = all of them.',
 			},
 			{
 				displayName: 'Additional Fields',
@@ -91,26 +97,27 @@ export class LoomCycleRunCompleted implements INodeType {
 			);
 		}
 
+		// A listing with no status filter returns RUNNING runs only, so the
+		// terminal statuses must be asked for by name. One request per status
+		// rather than a comma list: the list form needs loomcycle ≥ v1.113, and
+		// an older server answers it with an empty page instead of an error.
+		const wanted = (statuses.length > 0 ? statuses : TERMINAL_STATUSES) as AgentStatus[];
 		const client = await getClient(this);
-		let agents;
+		const agents: Agent[] = [];
 		try {
-			agents = await client.listUserAgents(userId);
+			for (const status of wanted) {
+				agents.push(...(await client.listUserAgents(userId, { status, parentAgentId })));
+			}
 		} catch (err) {
 			throw wrapLoomcycleError(err, this.getNode());
 		}
 
-		const wanted = new Set(statuses);
 		const seen = readSeenSet(this, SEEN_KEY);
-		const fresh = agents.filter((a) => {
-			const row = a as unknown as { agent_id: string; status: string; parent_agent_id?: string };
-			if (!wanted.has(row.status)) return false;
-			if (parentAgentId && row.parent_agent_id !== parentAgentId) return false;
-			return !seen.has(row.agent_id);
-		});
+		const fresh = agents.filter((a) => !seen.has(a.agent_id));
 
 		if (fresh.length === 0) return null;
 
-		for (const a of fresh) seen.add((a as unknown as { agent_id: string }).agent_id);
+		for (const a of fresh) seen.add(a.agent_id);
 		writeSeenSet(this, SEEN_KEY, seen);
 
 		return [fresh.map((a) => ({ json: a as unknown as IDataObject }))];
