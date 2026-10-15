@@ -361,3 +361,27 @@ export async function loadModels(this: ILoadOptionsFunctions): Promise<INodeProp
 		return [inherit, failedToLoadOption('models', err)];
 	}
 }
+
+/**
+ * Decision models for the Decision node (loomcycle ≥ v1.107). A deployment
+ * without a `decision:` block answers 503, so the fallback says what is
+ * missing rather than showing a load failure.
+ */
+export async function loadDecisionModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const byDefault: INodePropertyOptions = { name: "The Deployment's Default", value: '' };
+	try {
+		const client = await getClient(this);
+		const resp = await client.listDecisionModels();
+		const models = [...(resp.models ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+		return [
+			byDefault,
+			...models.map((m) => ({
+				name: m.name === resp.default ? `${m.name} (default)` : m.name,
+				value: m.name,
+				description: `${m.provider} · ${m.model} · up to ${m.limits.max_questions} questions`,
+			})),
+		];
+	} catch (err) {
+		return [byDefault, failedToLoadOption('decision models', err)];
+	}
+}

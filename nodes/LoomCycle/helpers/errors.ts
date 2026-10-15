@@ -264,9 +264,14 @@ export function wrapLoomcycleError(err: unknown, node: INode): Error {
 	}
 
 	if (err instanceof UnavailableError) {
+		// One status covers a runtime that is briefly unavailable and a feature
+		// this deployment does not have at all; the body's code tells them apart.
+		const missing = err.code ? UNCONFIGURED_FEATURES[err.code] : undefined;
 		return new NodeApiError(node, jsonifyError(err), {
-			message: 'Loomcycle backend unavailable',
-			description: redactBearerFragments(err.bodyText ?? ''),
+			message: missing ? `This loomcycle deployment has no ${missing}` : 'Loomcycle backend unavailable',
+			description: missing
+				? 'Retrying will not help. Ask a loomcycle operator to configure it.'
+				: redactBearerFragments(err.bodyText ?? ''),
 			httpCode: '503',
 		});
 	}
@@ -317,6 +322,13 @@ function jsonifyError(err: LoomcycleError): JsonObject {
 		retryable: err.retryable,
 	};
 }
+
+/** 503 codes that mean "this deployment lacks the feature", by what it lacks. */
+const UNCONFIGURED_FEATURES: Record<string, string> = {
+	decision_not_configured: 'decision models (a decision: block in its configuration)',
+	vector_unsupported: 'vector search support',
+	store_unavailable: 'persistent store for this operation',
+};
 
 /**
  * Remedies for refusals that arrive as a plain LoomcycleError: each is keyed by

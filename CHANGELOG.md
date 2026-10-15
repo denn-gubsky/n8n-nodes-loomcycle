@@ -2,6 +2,26 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] — 2026-10-15
+
+**Minor release.** Phase 3 of the v1.113 catch-up: two judgement primitives. **33 → 35 nodes.**
+
+### Added
+
+- **LoomCycle Decision** — `Decide` / `List Models` (RFC EB, loomcycle ≥ v1.107).
+  - Ask a decision model typed questions about a JSON state. *Choice*, *Yes / No* and *Score* questions are built from fields, with one option or level per line (`name: what it means`), or given as raw JSON.
+  - The output keeps every answer with its probabilities and adds `values`: one plain value per question for an IF / Switch node. A definite no is kept as `0`, never dropped.
+  - The model dropdown marks the deployment's default.
+- **LoomCycle Evaluation** — `Submit` / `Get` / `List for Run` / `List for Definition` / `Aggregate`. This was the last unbuilt node from the original n8n RFC; loomcycle v1.113 served evaluations over HTTP for it. Score `0` is always sent, since it is a real score. Needs a tenant-level token, and the node says so.
+
+### Fixed
+
+- **A deployment that lacks a feature no longer reads as "backend unavailable".** Some 503s mean the feature is not configured on this deployment: `decision_not_configured`, `vector_unsupported`, `store_unavailable`. These now say what is missing and that retrying will not help.
+
+### Verified against a local loomcycle v1.113.0
+
+Through the compiled nodes: Submit with a score of 0 plus a dimension and rationale, read back by List for Run and Get. Decide on a deployment with no decision models returned the new message (`code: decision_not_configured`, `retryable: false`). **Answers from a real decision model were not exercised.** The local server has none, so the question shapes are covered by unit tests against the adapter types. **Not yet verified in a live n8n.**
+
 ## [4.2.0] — 2026-10-15
 
 **Minor release.** Phase 2 of the v1.113 catch-up: the Team node catches up to loomcycle's team arc (v1.89–v1.113).
