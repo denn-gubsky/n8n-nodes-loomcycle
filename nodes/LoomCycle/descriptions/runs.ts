@@ -316,7 +316,7 @@ const START_ONLY_FIELDS: INodeProperties[] = [
 			{ name: 'Recap', value: 'recap', description: 'Summarise older turns, keep the recent ones' },
 			{ name: 'Stateful', value: 'stateful', description: 'Carry a structured state instead of the transcript' },
 		],
-		description: 'How the run keeps its context as it grows (loomcycle ≥ v1.85)',
+		description: 'How the run keeps its context as it grows (loomcycle ≥ v1.70)',
 	},
 	{
 		displayName: 'Hook Names or IDs',
@@ -475,7 +475,7 @@ export const runOps: INodeProperties[] = [
 			{
 				name: 'Retune',
 				value: 'retune',
-				description: 'Change a live or parked run\'s model, limits, review or tool choice without sending it a turn',
+				description: 'Change a live or parked run\'s model, limits, review or tool choice without sending it a turn (loomcycle ≥ v1.83)',
 				action: 'Retune a run',
 			},
 			{
@@ -711,7 +711,7 @@ export const runOps: INodeProperties[] = [
 			},
 		]),
 		description:
-			'The settings to change on a live or parked run (loomcycle ≥ v1.82). The answer is the run\'s merged configuration. A finished run cannot be retuned.',
+			'The settings to change on a live or parked run (loomcycle ≥ v1.83). The answer is the run\'s merged configuration. A finished run cannot be retuned.',
 	},
 
 	// ---- Get Run Config ----

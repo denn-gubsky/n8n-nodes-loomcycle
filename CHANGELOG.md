@@ -2,6 +2,27 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] — 2026-10-15
+
+**Minor release (full edition).** Mirrors slim-edition **4.5.0** — Phase 5 of the v1.113 catch-up.
+
+### Fixed — mirrored from slim 4.5.0
+
+- **A channel webhook could not be created from the Webhook node.** The delivery is now explicit, and a saved channel-only workflow is read as a channel webhook.
+
+### Added — mirrored from slim 4.5.0
+
+- **Schedule:** Each Fire (agent / channel / team walk), Concurrency Policy, Max Fires, and List All / Get State / Run Now / Pause / Resume.
+- **Webhook:** Each Delivery (agent / channel / team with JSONPath vars), Verification (`$cred:` credential, method, provider, events).
+- **Channel:** Hold Messages, Release, Publish Hooks.
+- **History** content search and turn paging; **Path** List paging; **Memory** Search time window.
+
+### Corrected
+
+- The loomcycle versions cited in 3.0.0–3.4.0 (HookDef v1.96, Retune v1.83, Context Mode v1.70, team walks and Team promote/retire/verify v1.77, team variables v1.104, also on the Team Tool). Text only.
+
+Typecheck, lint and tests pass; exercised live on the slim branch against a local loomcycle v1.113.0. **Not yet verified in a live n8n.**
+
 ## [3.4.0] — 2026-10-15
 
 **Minor release (full edition).** Mirrors slim-edition **4.4.0** — Phase 4 of the v1.113 catch-up, loomcycle's credential store. **43 nodes, 2 credential types.**

@@ -1,7 +1,7 @@
 import type { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 import { executeLoomCycle } from '../LoomCycle/execute';
-import { loadChannels } from '../LoomCycle/helpers/loadOptions';
+import { loadChannels, loadHookDefNames } from '../LoomCycle/helpers/loadOptions';
 import { channelOps } from '../LoomCycle/descriptions';
 
 /**
@@ -30,6 +30,7 @@ export class LoomCycleChannel implements INodeType {
 	methods = {
 		loadOptions: {
 			loadChannels,
+			loadHookDefNames,
 		},
 	};
 

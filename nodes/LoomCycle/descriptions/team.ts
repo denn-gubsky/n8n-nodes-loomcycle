@@ -11,10 +11,11 @@ import type { INodeProperties } from 'n8n-workflow';
  * Unlike the other Def families this maps to TYPED adapter methods (create,
  * fork, promote, retire, verify, list versions, run, the walk's breakpoints and
  * its team channels) rather than one op-discriminated call, so it does not
- * reuse `buildSubstrateInput`. Promote / Retire / Verify reached the adapter in
- * loomcycle v1.113, closing the gap where a fork could not be put in force.
+ * reuse `buildSubstrateInput`. Promote / Retire / Verify have been on the adapter
+ * since loomcycle v1.77 (the node exposes them from 4.2.0); verifying an unsaved
+ * graph needs v1.105, team channels v1.108, fork-with-promote v1.113.
  *
- * A walk is a run (loomcycle ≥ v1.101): Run returns its `run_id`, which Cancel
+ * A walk is a run (loomcycle ≥ v1.77): Run returns its `run_id`, which Cancel
  * Walk, List Walk Runs and the breakpoint ops take.
  *
  * Options arrays are alphabetised by name per the n8n-nodes-base convention.
@@ -367,7 +368,7 @@ export const teamOps: INodeProperties[] = [
 		default: true,
 		displayOptions: { show: { resource: ['team'], operation: ['run'] } },
 		description:
-			'Whether to block until the walk ends and return its per-state trace. Off = start it detached and return its run_id at once (loomcycle ≥ v1.101); the walk carries on by itself — follow it with List Walk Runs, the Run Completed trigger, or Cancel Walk.',
+			'Whether to block until the walk ends and return its per-state trace. Off = start it detached and return its run_id at once (loomcycle ≥ v1.77); the walk carries on by itself — follow it with List Walk Runs, the Run Completed trigger, or Cancel Walk.',
 	},
 	{
 		displayName: 'Variables',
@@ -388,7 +389,7 @@ export const teamOps: INodeProperties[] = [
 			},
 		],
 		description:
-			"Set the team's declared variables for this walk (`${var.&lt;name&gt;}`; loomcycle ≥ v1.89). Only names the team declares are accepted; the rest keep their defaults. At most 4 KiB in all.",
+			"Set the team's declared variables for this walk (`${var.&lt;name&gt;}`; loomcycle ≥ v1.104). Only names the team declares are accepted; the rest keep their defaults. At most 4 KiB in all.",
 	},
 	{
 		displayName: 'Walk Options',

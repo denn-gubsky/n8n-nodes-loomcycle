@@ -132,7 +132,7 @@ export class LoomCycleTeamTool implements INodeType {
 					},
 				],
 				description:
-					'Set the team\'s declared variables on every walk this tool starts (loomcycle ≥ v1.89). Pinned here, not chosen by the model — like the team itself. Undeclared names are refused.',
+					'Set the team\'s declared variables on every walk this tool starts (loomcycle ≥ v1.104). Pinned here, not chosen by the model — like the team itself. Undeclared names are refused.',
 			},
 			{
 				displayName: 'A team run walks the whole graph, spawning an agent per state, so it can take a while and consume a real share of the token budget — the parent agent will block on it. It runs under the same admission a normal run gets, so a budget ceiling stops it. Authoring ops (Create / Fork / Delete) are deliberately not exposed to the model; use the LoomCycle Team action node for those.',

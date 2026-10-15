@@ -1,7 +1,7 @@
 import type { IExecuteFunctions, INodeExecutionData, INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 import { executeLoomCycle } from '../LoomCycle/execute';
-import { loadAgents, loadChannels } from '../LoomCycle/helpers/loadOptions';
+import { loadAgents, loadChannels, loadTeams } from '../LoomCycle/helpers/loadOptions';
 import { webhookDefOps } from '../LoomCycle/descriptions';
 
 /**
@@ -35,6 +35,7 @@ export class LoomCycleWebhook implements INodeType {
 		loadOptions: {
 			loadAgents,
 			loadChannels,
+			loadTeams,
 		},
 	};
 
