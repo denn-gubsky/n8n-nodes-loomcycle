@@ -98,6 +98,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
   - **Since loomcycle v1.101–v1.113:** a walk is a run. `Run` can start it **detached** (turn off *Wait for the Walk to Finish*) and returns its `run_id`, which `Cancel Walk`, `List Walk Runs` and the breakpoint ops take. `Run` also sets the team's **Variables**, holds chosen states' answers **for review**, arms **breakpoints**, takes an **Idempotency Key**, and can **ask a human at the iteration cap**. `Create` / `Fork` have a **Promote** toggle (Create on, Fork off by default), and `Verify` checks either a deployed version against a hash or an **unsaved graph** (every problem a save would hit, each with a JSON path).
 - **LoomCycle Decision** — `Decide` / `List Models` — ask a loomcycle **decision model** typed questions about a piece of state (RFC EB; requires loomcycle ≥ v1.107 and a `decision:` block in its configuration): *Choice* (pick one of 2–26 options), *Yes / No*, or *Score* (a position on a 2–26-level scale, lowest first), 1–64 questions per call. Each answer comes with its probabilities, and the output adds **`values`** — one plain value per question (the chosen option, the yes probability, the score) — for an IF or Switch node. The cheap classifier in front of a branch: route a ticket, gate a step, grade a draft. Probabilities are a judgement, not a calibrated measurement.
 - **LoomCycle Evaluation** — `Submit` / `Get` / `List for Run` / `List for Definition` / `Aggregate` — record scores against runs (overall score, named dimensions, a rationale, a structured judgement) and roll them up per agent-definition version, optionally across its fork lineage (requires loomcycle ≥ v1.113). The substrate half of an evaluation loop n8n schedules. **Needs a tenant-level token** (`substrate:tenant`): a user or member token may only score its own run from inside that run.
+- **LoomCycle Credential** — `Create or Rotate` / `Get` / `List` / `Delete` — loomcycle's own encrypted credential store (requires loomcycle ≥ v1.113 for the typed adapter, and `LOOMCYCLE_SECRET_KEY` on the loomcycle host). The secret **value is taken from a LoomCycle Secret credential**, never a node parameter, so it is not saved in the workflow or its executions. Every output is metadata only. See [Credentials in loomcycle](#credentials-in-loomcycle).
 - **LoomCycle Directory** — `List Users` / `Inspect Subject` / `List Tenants` — read-only "who is in this deployment and what is held for them" (loomcycle ≥ v1.46). `Inspect` aggregates one subject's activity, chats, memory, documents, budget and usage in a single call. There is no create or update: a user here is **derived from run activity**, not stored. `List Tenants` needs an operator-admin token and refuses a tenant-scoped one outright rather than filtering.
 - **LoomCycle Erasure** — `Report` / `Execute` — subject erasure (RFC BL P5; requires loomcycle ≥ v1.45, **and the deployment must set `LOOMCYCLE_AUDIT_LOG_PATH`** from v1.55). The natural home for a **GDPR data-subject-request workflow**. Three tiers: deletable, subject-keyed-but-uncovered, and residue — facts about the subject in scopes they do not own. `Execute` is a **dry run unless you commit**, and committing additionally requires retyping the subject. **Persist the Execute output**: residue is traceable only through the subject's chats, which Execute deletes, so a later report shows 0 while those facts remain — the response is the only durable record.
 - **LoomCycle User** — `List` / `List Tokens` / `Revoke Token` — tenant-owned users and their delegated bearer tokens (RFC BX P2; requires ≥ v1.50). The tenant is always server-derived, so no operation takes one. **Reads plus one revocation, by design.** Identity CRUD is absent because provisioning and removing users is operator work for the loomcycle CLI / Web UI, not a workflow side effect; `Revoke Token` stays because cutting off a leaked credential is exactly what you want to automate on an alert. **Minting is absent for a stronger reason** — the substrate returns the bearer plaintext once, and it must not land in execution data.
@@ -164,6 +165,21 @@ The **LoomCycle MCP Server** action node registers HTTP / Streamable-HTTP MCP se
 **A create-time check to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one).
 
 > *(Through v2.x this was an auto-provisioning AI-Agent cluster tool. That tool was langchain-based and removed in v3.0.0; the same substrate capability is now driven explicitly via the MCP Server action node.)*
+
+### Credentials in loomcycle
+
+Secrets that loomcycle itself must use (an MCP server's token, a hook's signing key) live in **loomcycle's credential store**, encrypted, and are referenced by name as `$cred:<name>`. They are resolved per call, agent > user > tenant, and their value is never returned by any API.
+
+1. In n8n, create a **LoomCycle Secret API** credential holding the value. It sits in n8n's credential store like any other credential.
+2. Run **LoomCycle Credential → Create or Rotate** with that credential, a name and a scope. The value goes to loomcycle once. Re-run it to rotate.
+3. Reference it as `$cred:<name>` in MCP server headers, hook headers, a hook's **Signing Credential**, or per-tool credentials.
+
+*Send It To* sets where loomcycle may send the value:
+- **anywhere** (the default; on a rotate, the existing restriction is kept);
+- **only under these https URLs**;
+- **nowhere**, a compare-only value. A compare-only credential cannot sign hook deliveries.
+
+*Expires At* makes loomcycle refuse the credential everywhere after that moment.
 
 ### Secrets in headers: `$cred:<name>`
 
@@ -301,6 +317,7 @@ npm link @loomcycle/n8n-nodes-loomcycle
 | Team Promote / Retire / Verify (incl. unsaved graph), fork-with-promote, ask at cap | **v1.113** | Team node |
 | **Decision models** (RFC EB) | **v1.107** | Decision node — also needs a `decision:` block (Ollama ≥ 0.35 serves the models) |
 | **Evaluation over HTTP** | **v1.113** | Evaluation node — tenant-level token |
+| **Credential store** (typed adapter, `expires_at` enforced) | **v1.113** | Credential node + LoomCycle Secret API credential — needs `LOOMCYCLE_SECRET_KEY` |
 
 If you're on older loomcycle, the unaffected nodes still work; the gated ones surface a clean `NodeApiError("Requires loomcycle vX.Y")`.
 
@@ -328,7 +345,6 @@ Most nodes work with any bearer, but the scope matters for some:
 Some substrate operations have no `@loomcycle/client` method yet, so no node can expose them — this package never hand-rolls a wire call (see [CLAUDE.md](CLAUDE.md) "Adapter conformance"). The ones you are most likely to notice:
 
 - **Team `render_diagram` overlay preview and `format`.** The substrate can syntax-check an *unsaved* graph and render it without persisting, and emit d2 as well as Mermaid; the adapter's wrapper takes neither.
-- **Credentials.** The adapter gained `createCredential` / `getCredential` / `listCredentials` / `deleteCredential` in loomcycle v1.113; no node exposes them yet.
 
 ### Verified deployments
 

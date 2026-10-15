@@ -27,3 +27,4 @@ export { factOps } from './fact';
 export { documentSourceDefOps } from './documentsourcedef';
 export { decisionOps } from './decision';
 export { evaluationOps } from './evaluation';
+export { credentialOps } from './credential';
