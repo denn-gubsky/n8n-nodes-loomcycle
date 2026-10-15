@@ -57,7 +57,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 - **LoomCycle Skill Definition** — same 7 ops as AgentDef, applied to skills
 - **LoomCycle MCP Server** — `Register` / `Fork` / `Promote` / `Retire` / `Get` / `List Versions` / `Rediscover` / `Verify` — dynamic MCP server registration (requires loomcycle ≥ v0.9.2)
 - **LoomCycle Schedule** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — substrate-native scheduled runs (RFC E; requires loomcycle ≥ v0.12.x). Fired runs land on the **Run Completed** trigger.
-- **LoomCycle Hook** — `Register` / `List` / `Delete` — **outbound** pre/post-tool webhook callbacks; point the callback URL at an n8n **Webhook** trigger to call back into a workflow on matched tool calls.
+- **LoomCycle Hook** — `Create` / `Fork` / `Get` / `List Names` / `List Versions` / `Promote` / `Retire` / `Verify` / `Delete` — reusable, versioned **hook definitions** (HookDef, RFC DK; requires loomcycle ≥ v1.97). A hook gates tool calls (`pre` / `post` / `post_failure`), the run itself (`agent_start` / `agent_stop` / `subagent_*` / `pre_compact`, …) or a channel's messages (`channel_publish`), with a webhook or code-js body. It fires on nothing by itself: an agent definition, a team state or a run names it. **Create** registers a new version only when the definition changed, so a re-run workflow doesn't pile up identical versions. A webhook body can be **signed** (Signing Credential, loomcycle ≥ v1.113). *loomcycle v1.97 removed the old global registration API, so the former `Register` / `List` / `Delete` operations are gone.*
 - **LoomCycle Webhook** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — **inbound** webhook endpoints (RFC H; requires loomcycle ≥ v0.14.x): an external POST to a loomcycle-hosted endpoint spawns an agent run / publishes to a channel. (Distinct from **Hook** above, which is outbound.)
 - **LoomCycle A2A Agent** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — register **external** A2A (Agent2Agent) agents loomcycle can call as tools (RFC G; requires loomcycle ≥ v0.14.x).
 - **LoomCycle A2A Server Card** — `Create` / `Fork` / `Get` / `List Versions` / `Retire` — manage the agent card loomcycle **publishes** to expose its own agents to external A2A clients (RFC G; requires loomcycle ≥ v0.14.x).
@@ -139,23 +139,19 @@ The same registration is also available explicitly via the **LoomCycle MCP Serve
 
 **Tool auto-discovery (loomcycle ≥ v0.20).** Register/Fork run the MCP `tools/list` handshake at registration and return a `discovered` count in the node output — you see the tool surface immediately instead of waiting for first call. It's best-effort: an unreachable peer still registers and self-heals lazily. Untick **Discover Tools at Registration** (action node) to register connection metadata only.
 
-**Two create-time checks to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one), and inner `${LOOMCYCLE_*}` header tokens are **expanded at registration** — so those env vars must exist on the deployment before you Register, or the discovery handshake authenticates with an unresolved token.
+**A create-time check to know about (v0.20):** the URL host is validated against the allowlist *at registration* (a loopback / RFC1918 callback host must be in the **private** host allowlist, not just the general one).
 
-### The env-var mirror
+### Secrets in headers: `$cred:<name>`
 
-The Headers field accepts **template strings** (not plaintext credentials):
-
-```
-Authorization: Bearer ${LOOMCYCLE_SLACK_TOKEN}
-```
-
-At request time, loomcycle substitutes `${LOOMCYCLE_*}` tokens from its own environment. **The operator must mirror the credential**: it lives in n8n (for n8n's own Slack credential, if any) AND in loomcycle's env (`LOOMCYCLE_SLACK_TOKEN=…`). Plaintext credentials never traverse the n8n → loomcycle wire.
-
-The cluster sub-node logs the detected env-var names so you can see them in n8n's execution log:
+The Headers field takes **references**, never a secret. Store the secret once in loomcycle as a credential and reference it by name:
 
 ```
-[LoomCycleMcpServerTool] MCP server slack-mcp registered. Required env vars on loomcycle: LOOMCYCLE_SLACK_TOKEN
+Authorization: Bearer $cred:slack-token
 ```
+
+loomcycle resolves `$cred:<name>` on every call (agent > user > tenant credential), so nothing secret travels from n8n to loomcycle and nothing has to be copied into loomcycle's environment.
+
+**`${LOOMCYCLE_*}` env references are now admin-only.** From loomcycle **v1.113** a runtime MCP server definition holding `${NAME}` is refused when an agent dials it, unless an **admin** token saved it. So with a tenant or user token, `$cred:` is the only form that works; with an admin token the old env form still works, but the env var must exist on the loomcycle host *before* you register (the discovery handshake expands it). Operators can restore the old behaviour temporarily with `LOOMCYCLE_MCP_REFUSE_UNATTRIBUTED_ENV=0`. The MCP Server Tool sub-node logs any env references it registers, as a reminder of that condition.
 
 ## Code-JS agents
 
@@ -234,6 +230,10 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | Per-run sampling override | **v0.28** | Run → Spawn → Sampling (JSON) |
 | Per-run / mid-run compaction | **v0.32** | Run → Spawn → Compaction (JSON); Run → Compact |
 | Batch spawn (RFC Y) | **v0.33** | Run → Spawn Batch |
+| Review holds (RFC DJ) — `rejected` status | **v1.93** | Run Completed trigger's *Rejected* status; Spawn reports `awaitingReview` |
+| **Hook definitions** (HookDef, RFC DK) | **v1.97** | Hook node. The old `Register` / `List` / `Delete` API was removed upstream in v1.97 |
+| Idempotent spawns (`deduplicated`) | **v1.106** | Spawn reports `deduplicated: true` |
+| Signed hook deliveries · scope-naming 403s · `$cred:`-only MCP headers for non-admins | **v1.113** | Hook → Signing Credential; errors name the missing scope |
 | **Agent Teams** (RFC AP) — Team node + Team Tool | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
 | Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
 | Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits |
@@ -268,7 +268,7 @@ If you're on older loomcycle, the unaffected nodes still work; the gated ones su
 
 ### `@loomcycle/client` pin
 
-This package pins `@loomcycle/client` to `^1.55.0`, **bundled into the published nodes at build time** (esbuild) — so the install carries no runtime npm dependency on the adapter. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. As of v2.13.0 the package covers the loomcycle surface through **v1.55** (see the compatibility table above). `@langchain/core` is a peer (the Tool sub-nodes + Chat Model); `n8n-workflow` is the host-provided peer.
+This package pins `@loomcycle/client` to `^1.113.0`, **bundled into the published nodes at build time** (esbuild) — so the install carries no runtime npm dependency on the adapter. The adapter tracks loomcycle's minor version; consuming a new wire method bumps the bundled version. As of v3.0.0 the package builds against the loomcycle **v1.113** adapter; v1.56–v1.113 features land progressively (see the compatibility table above). `@langchain/core` is a peer (the Tool sub-nodes + Chat Model); `n8n-workflow` is the host-provided peer.
 
 ### Verified deployments
 
@@ -308,9 +308,13 @@ You're on a loomcycle older than v0.9.2 (PR #177). Upgrade the substrate.
 
 This is the substrate's server-side stream cap. The trigger reconnects transparently — check the n8n execution log; you should see emit events resume within seconds. If your reverse proxy / Cloudflare drops long-lived connections, switch the trigger's `Transport` parameter to **Polling**.
 
-### `LoomCycleMcpServerTool` says "Required env vars on loomcycle: …"
+### An agent can't reach an MCP server whose headers use `${LOOMCYCLE_*}`
 
-That's the env-var-mirror hint, not an error. Set the listed env vars on the loomcycle deployment (not on n8n). Restart loomcycle so they're in scope. The MCP server will then authenticate when the agent invokes it.
+From loomcycle v1.113 an env reference in a runtime MCP server definition is refused unless an admin saved it. Store the secret as a loomcycle credential and change the header to `$cred:<name>` (see [Secrets in headers](#secrets-in-headers-credname)), then register again. `LoomCycleMcpServerTool` logs the env references it registered so you can find them.
+
+### The Hook node's `Register` operation is gone
+
+loomcycle v1.97 removed global hook registration (`POST /v1/hooks`) and dropped its table, so hooks registered that way stopped firing on upgrade. Define the hook with **Hook → Create** instead, then name it where it should apply: in an agent definition's `hooks:` (or a `tools[]` entry), on a team state, or on a single run.
 
 ### Cluster sub-nodes (`LoomCycle * Tool`) don't appear in n8n's AI Agent picker
 

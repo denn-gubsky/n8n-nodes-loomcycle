@@ -27,11 +27,12 @@ import type { INodeProperties } from 'n8n-workflow';
  *   - create is content-addressed: a byte-identical re-register is a no-op
  *     (`deduplicated: true`) instead of minting a new version.
  *
- * Headers carry the v0.8.14 `${LOOMCYCLE_*}` / `${run.user_bearer}`
- * substitution patterns; n8n nodes accept TEMPLATE STRINGS only —
- * plaintext credentials never travel through this wire path. The UI
- * surfaces a "Required env vars on the loomcycle deployment" notice
- * extracted from the headers via helpers/envVarHints.ts.
+ * Headers carry references, never secrets. Since loomcycle v1.113 a runtime
+ * definition holding `${NAME}` env references is refused when dialed unless an
+ * ADMIN saved it, so the recommended form is `$cred:<name>` — a credential
+ * stored in loomcycle (LoomCycle Credential node), resolved per request.
+ * `${LOOMCYCLE_*}` still works in an admin-saved definition; the notice below
+ * explains both.
  *
  * Op options array is alphabetised by name.
  */
@@ -210,24 +211,24 @@ export const mcpServerDefOps: INodeProperties[] = [
 						default: '',
 						required: true,
 						description:
-							'Header value. Supports `${LOOMCYCLE_FOO}` env-var substitution and `${run.user_bearer:-FALLBACK}` per-run substitution.',
+							'Header value. Reference a stored loomcycle credential as `$cred:&lt;name&gt;` (for example `Bearer $cred:slack-token`), never the secret itself. `${run.user_bearer:-FALLBACK}` substitutes the run\'s own bearer.',
 					},
 				],
 			},
 		],
 		description:
-			'HTTP headers sent on every MCP call. Use template strings (`${LOOMCYCLE_FOO_TOKEN}`) to reference env vars set on the loomcycle deployment — plaintext credentials never travel through this wire path.',
+			'HTTP headers sent on every MCP call. Put secrets in a loomcycle credential and reference it as `$cred:&lt;name&gt;` — plaintext credentials never travel through this wire path.',
 	},
 
 	// ---- Env-var hint notice (Register only) ----
 	{
-		displayName: 'Required Env Vars on Loomcycle',
+		displayName: 'Secrets in Headers: Use $cred:&lt;name&gt;',
 		name: 'envVarNotice',
 		type: 'notice',
 		default: '',
 		displayOptions: { show: { resource: ['mcpServerDef'], operation: ['create'] } },
 		description:
-			'Loomcycle substitutes `${LOOMCYCLE_*}` tokens in header values from its own env. As of loomcycle v0.20 these are expanded at REGISTRATION time (not just per-request), so the env vars must exist on the deployment before you Register or the discovery handshake authenticates with an unresolved token. Per-run `${run.*}` placeholders stay literal. Plaintext credentials never travel this wire path.',
+			'Store the secret once in loomcycle as a credential and write `$cred:&lt;name&gt;` in the header; loomcycle resolves it on each call. Env references like `${LOOMCYCLE_FOO}` work only in a definition an admin saved: from loomcycle v1.113 one saved by any other token is refused when an agent dials it.',
 	},
 
 	// ---- Discover tools at registration (Register / Fork) ----

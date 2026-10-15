@@ -498,9 +498,11 @@ export const runOps: INodeProperties[] = [
 			{ name: 'All', value: '' },
 			{ name: 'Cancelled', value: 'cancelled' },
 			{ name: 'Completed', value: 'completed' },
+			{ name: 'Configured (Draft, Not Started)', value: 'configured' },
 			{ name: 'Failed', value: 'failed' },
+			{ name: 'Rejected (At Review)', value: 'rejected' },
 			{ name: 'Running', value: 'running' },
 		],
-		description: 'Filter the listing by run status',
+		description: 'Filter the listing by run status. Configured and Rejected need loomcycle ≥ v1.93.',
 	},
 ];

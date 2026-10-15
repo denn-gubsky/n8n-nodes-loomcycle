@@ -7,8 +7,11 @@ import type {
 	ChannelAwaitMode,
 	ChannelScope,
 	CreateChannelOptions,
+	HookDefBody,
+	HookDefForkOverlay,
+	HookDefOverlay,
+	HookEvent,
 	HookFailMode,
-	HookPhase,
 	HistoryToolInput,
 	InterruptStatus,
 	CreateSnapshotOptions,
@@ -19,7 +22,6 @@ import type {
 	MemorySearchInput,
 	MemorySource,
 	PathToolInput,
-	RegisterHookOptions,
 	RunBatchOptions,
 	RunOptions,
 	SetMemoryEntryOptions,
@@ -30,7 +32,7 @@ import type {
 } from '@loomcycle/client';
 
 import { getClient, getCredentialDefault } from './helpers/client';
-import { wrapLoomcycleError } from './helpers/errors';
+import { loomcycleErrorFields, wrapLoomcycleError } from './helpers/errors';
 import { buildSegments, readImageParts } from './helpers/segments';
 import { drainRunStream } from './helpers/streaming';
 
@@ -128,7 +130,7 @@ export async function executeLoomCycle(
 			const wrapped = wrapLoomcycleError(err, ctx.getNode());
 			if (ctx.continueOnFail()) {
 				returnData.push({
-					json: { error: wrapped.message },
+					json: { error: wrapped.message, ...loomcycleErrorFields(err) },
 					error: wrapped as NodeOperationError,
 					pairedItem: { item: i },
 				});
@@ -319,7 +321,9 @@ async function executeRun(
 				'User ID is required for List Agents — set per-node or as a Default User ID on the credential.',
 			);
 		}
-		const opts = statusFilter ? { status: statusFilter as AgentStatus } : undefined;
+		// "All" must be asked for by name: a listing with no status holds RUNNING
+		// runs only. `status=all` has been accepted since loomcycle v0.4.
+		const opts = { status: (statusFilter || 'all') as AgentStatus | 'all' };
 		const agents = await client.listUserAgents(userId, opts);
 		return { agents } as unknown as IDataObject;
 	}
@@ -1589,10 +1593,14 @@ async function executeTeam(
 }
 
 /**
- * Pre/post-tool webhook registration. `registerHook` makes loomcycle POST
- * hook payloads to a consumer-run callback URL (typically an n8n Webhook
- * trigger node). `owner` defaults to the node id so re-runs are idempotent
- * on (owner, name) without the operator inventing an owner string.
+ * HookDef (RFC DK, loomcycle ≥ v1.97) — reusable, versioned hook definitions.
+ * The old global registration (`registerHook`) was removed upstream along with
+ * its table, so a hook is now a definition that an agent, team or run names.
+ *
+ * Create goes through `ensureHookDef` by default: a HookDef create is not
+ * content-addressed, so a workflow that re-runs Create would otherwise add an
+ * identical version every time. The overlay is the adapter's CLOSED
+ * `HookDefOverlay`, so this function only ever sets keys the server accepts.
  */
 async function executeHook(
 	ctx: IExecuteFunctions,
@@ -1600,41 +1608,138 @@ async function executeHook(
 	operation: string,
 	i: number,
 ): Promise<IDataObject> {
-	if (operation === 'register') {
-		const ownerParam = ctx.getNodeParameter('owner', i, '') as string;
-		const opts: RegisterHookOptions = {
-			owner: ownerParam || `n8n:${ctx.getNode().id}`,
-			name: ctx.getNodeParameter('name', i) as string,
-			phase: ctx.getNodeParameter('phase', i) as HookPhase,
-			callbackUrl: ctx.getNodeParameter('callbackUrl', i) as string,
-		};
-		const agents = parseCsv(ctx.getNodeParameter('agents', i, '') as string);
-		if (agents !== undefined) opts.agents = agents;
-		const tools = parseCsv(ctx.getNodeParameter('tools', i, '') as string);
-		if (tools !== undefined) opts.tools = tools;
-		const failMode = ctx.getNodeParameter('failMode', i, 'open') as HookFailMode;
-		if (failMode) opts.failMode = failMode;
-		const timeoutMs = ctx.getNodeParameter('timeoutMs', i, 0) as number;
-		if (typeof timeoutMs === 'number' && timeoutMs > 0) opts.timeoutMs = timeoutMs;
+	const node = ctx.getNode();
+	const rationale = ctx.getNodeParameter('defDescription', i, '') as string;
 
-		const resp = await client.registerHook(opts);
+	if (operation === 'create') {
+		const name = ctx.getNodeParameter('name', i) as string;
+		const event = ctx.getNodeParameter('event', i) as HookEvent;
+		const bodyKind = ctx.getNodeParameter('bodyKind', i, 'http') as 'http' | 'code-js';
+
+		let body: HookDefBody;
+		if (bodyKind === 'code-js') {
+			body = { kind: 'code-js', code: ctx.getNodeParameter('code', i) as string };
+		} else {
+			const httpBody: Extract<HookDefBody, { kind: 'http' }> = {
+				kind: 'http',
+				url: ctx.getNodeParameter('url', i) as string,
+			};
+			const headers = collectNameValuePairs(ctx.getNodeParameter('headers', i, {}), 'header');
+			if (Object.keys(headers).length > 0) httpBody.headers = headers;
+			const signingSecret = (ctx.getNodeParameter('signingCredential', i, '') as string).trim();
+			if (signingSecret) {
+				// The server refuses a literal too, but failing here keeps a
+				// pasted secret out of the request (and the execution log) entirely.
+				if (!signingSecret.startsWith('$cred:')) {
+					throw new NodeOperationError(
+						node,
+						'Signing Credential must name a stored loomcycle credential as $cred:<name>, not hold the secret itself. Store the value as a loomcycle credential first, then write $cred:<that name> here.',
+						{ itemIndex: i },
+					);
+				}
+				httpBody.signing_secret = signingSecret;
+			}
+			body = httpBody;
+		}
+
+		const overlay: HookDefOverlay = { event, body };
+		const failMode = ctx.getNodeParameter('failMode', i, 'open') as HookFailMode;
+		if (failMode) overlay.fail_mode = failMode;
+		const timeoutMs = ctx.getNodeParameter('timeoutMs', i, 0) as number;
+		if (typeof timeoutMs === 'number' && timeoutMs > 0) overlay.timeout_ms = timeoutMs;
+		const hookDescription = ctx.getNodeParameter('hookDescription', i, '') as string;
+		if (hookDescription) overlay.description = hookDescription;
+		// `match` is a tool-event field; the server refuses it on any other event,
+		// and the field is hidden for those events so a stale value must not leak.
+		if (TOOL_HOOK_EVENTS.includes(event)) {
+			const tools = parseCsv(ctx.getNodeParameter('matchTools', i, '') as string);
+			if (tools !== undefined) overlay.match = { tools };
+		}
+
+		const onlyIfChanged = ctx.getNodeParameter('onlyIfChanged', i, true) as boolean;
+		if (onlyIfChanged) {
+			const resp = await client.ensureHookDef(name, overlay, rationale ? { description: rationale } : undefined);
+			return resp as unknown as IDataObject;
+		}
+		const promote = ctx.getNodeParameter('promote', i, true) as boolean;
+		const resp = await client.createHookDef(name, overlay, {
+			promote,
+			...(rationale ? { description: rationale } : {}),
+		});
 		return resp as unknown as IDataObject;
 	}
 
+	if (operation === 'fork') {
+		const name = ctx.getNodeParameter('hookName', i) as string;
+		const parsed = parseJsonField(ctx.getNodeParameter('overlay', i, '{}'), { strict: true, node });
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			throw new NodeOperationError(node, 'Fields to Replace must be a JSON object.', { itemIndex: i });
+		}
+		const parentDefId = ctx.getNodeParameter('parentDefId', i, '') as string;
+		const promote = ctx.getNodeParameter('promote', i, false) as boolean;
+		// The operator's JSON is not checked against the closed overlay type at
+		// compile time; the server's strict decode refuses an unknown key (422).
+		const resp = await client.forkHookDef(name, parsed as HookDefForkOverlay, {
+			promote,
+			...(parentDefId ? { parentDefId } : {}),
+			...(rationale ? { description: rationale } : {}),
+		});
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'get') {
+		const defId = ctx.getNodeParameter('defId', i, '') as string;
+		const name = ctx.getNodeParameter('hookName', i, '') as string;
+		if (!defId && !name) {
+			throw new NodeOperationError(node, 'Get needs a hook name or a Definition ID.', { itemIndex: i });
+		}
+		const resp = await client.hookDef(defId ? { op: 'get', def_id: defId } : { op: 'get', name });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listNames') {
+		const resp = await client.listHookDefNames();
+		return { names: resp.names ?? [] } as unknown as IDataObject;
+	}
+
 	if (operation === 'list') {
-		const hooks = await client.listHooks();
-		return { hooks } as unknown as IDataObject;
+		const name = ctx.getNodeParameter('hookName', i) as string;
+		const resp = await client.hookDef({ op: 'list', name });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'promote') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		const resp = await client.hookDef({ op: 'promote', def_id: defId });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'retire') {
+		const defId = ctx.getNodeParameter('defId', i) as string;
+		const retired = ctx.getNodeParameter('retired', i, true) as boolean;
+		const resp = await client.hookDef({ op: 'retire', def_id: defId, retired });
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'verify') {
+		const name = ctx.getNodeParameter('hookName', i) as string;
+		const contentSha256 = ctx.getNodeParameter('contentSha256', i, '') as string;
+		const resp = await client.hookDef(
+			contentSha256 ? { op: 'verify', name, content_sha256: contentSha256 } : { op: 'verify', name },
+		);
+		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'delete') {
-		const id = ctx.getNodeParameter('hookId', i) as string;
-		await client.deleteHook(id);
-		// Adapter returns void on success; surface a consistent ok envelope
-		return { ok: true, id } as IDataObject;
+		const name = ctx.getNodeParameter('hookName', i) as string;
+		const resp = await client.hookDef({ op: 'delete', name });
+		return resp as unknown as IDataObject;
 	}
 
-	throw new NodeOperationError(ctx.getNode(), `Unknown hook operation: ${operation}`);
+	throw new NodeOperationError(node, `Unknown hook operation: ${operation}`);
 }
+
+const TOOL_HOOK_EVENTS: HookEvent[] = ['pre', 'post', 'post_failure'];
 
 /**
  * Human-in-the-loop over Interruption.ask (v0.8.16). List pending asks by
