@@ -2,6 +2,30 @@
 
 All notable changes to `n8n-nodes-loomcycle` are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.0] — 2026-10-15
+
+**Minor release.** Phase 6, the last phase of the v1.113 catch-up: n8n as the policy behind a loomcycle hook. **37 nodes.**
+
+### Added
+
+- **LoomCycle: Hook Call** trigger — a webhook trigger that a HookDef's http body points at. The workflow decides each call, and its answer goes back as the hook's response: deny or rewrite a tool call, add context, stop a run before it starts, keep an agent working or hold its answer for review, release or drop a channel message.
+  - **Signature verification fails closed**, with the LoomCycle Secret API credential, the same one the Credential node stores in loomcycle for the HookDef's signing credential. The scheme is `t=<unix>,v1=<hex HMAC-SHA256(secret, t + "." + raw body)>`.
+  - **Replay protection:** a timestamp window (default 300 s), plus each `(delivery_id, t)` accepted once. loomcycle re-signs a legitimate retry with a fresh `t`, so a retry passes and a verbatim replay does not. The unsigned `X-Loomcycle-Delivery` / `-Hook` headers are never trusted.
+    - The seen pairs are pruned by **age**, never by count, so a busy hook cannot evict a still-replayable pair.
+    - The record is exact within one n8n process. Across concurrent executions or queue-mode workers it is best-effort, and the window is the hard bound.
+  - **Only These Hooks** binds the trigger to the signed `hook_name`. The signature covers the body, not the endpoint, so without it a call captured for one hook could be replayed to another trigger that shares the secret.
+  - The emitted data is parsed from the **signed bytes**, not from n8n's own parse of the body.
+  - **Respond:** with the last node's output (default), through a Respond to Webhook node, or immediately with an allowing `{}` (not n8n's default "Workflow was started" message).
+  - **Verified with `node:crypto`, not the adapter's `verifyLoomcycleDelivery`.** The adapter's Web Crypto lookup goes through `globalThis`, which the n8n Cloud scanner bans, so bundling it would fail verification. The built trigger contains no `globalThis`.
+- README section **Hook policy in n8n**: the five steps from shared secret to answer.
+
+### Verified against a local loomcycle v1.113.0
+
+- A signed HookDef was attached to a run and delivered to a capture listener. The compiled trigger verified that **real** delivery, and refused it replayed, tampered and with a wrong secret.
+- Separately, against the same server, loomcycle's handling of the answers was confirmed: `204` and `{}` allow; `{"decision":"deny","reason":…}` stops the run before it starts; `{"additional_context":…}` reaches the run as a `context` hook decision.
+
+**Not yet verified in a live n8n.** The response path (n8n relaying the last node's output) is n8n's own webhook machinery and was not exercised here.
+
 ## [4.5.0] — 2026-10-15
 
 **Minor release.** Phase 5 of the v1.113 catch-up: what triggers a run, held channels, and paging. **Includes one bug fix found live: channel webhooks.**
