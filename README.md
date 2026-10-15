@@ -51,6 +51,8 @@ Thirty-nine nodes (27 action + 4 trigger + 8 cluster sub-nodes) plus one credent
 As of **2.0.0** the former single multi-resource umbrella node is split into **dedicated action nodes**, each with its own canvas icon (n8n renders one icon per node type — separate nodes are the only way to give each entity a distinct glyph). They all share one credential and one wire client; they are drag-and-drop separate in the node picker.
 
 - **LoomCycle Run** — `Spawn` / `Spawn Batch` / `Send Input` / `Get Status` / `Get Transcript` / `Compact` / `Wait for Completion` / `Cancel` / `Cancel Turn` / `Replay Session` / `List Agents` / `List Runnable Agents`. Spawn-time **Sampling** / **Compaction** / **Run Timeout** overrides live under *Additional Fields*. `Spawn Batch` fans out up to 32 runs (loomcycle ≥ v0.33); `Compact` summarises a parked run's context (≥ v0.33). The full edition keeps the in-node **Wait for Completion** op (the slim edition cannot — n8n Cloud's scanner bans the timer primitives it needs). For **interactive runs** (≥ v1.1.1), enable *Additional Fields → Interactive Session* on `Spawn` — the node returns the `run_id` once the run parks at `end_turn`; steer it with `Send Input`. `Cancel Turn` stops the in-flight turn and parks the run without terminating it (RFC BH, ≥ v1.22); `Replay Session` replays a transcript into a new session on another agent (RFC BJ, ≥ v1.25); `List Runnable Agents` is the member-token-safe agent listing (RFC BY, ≥ v1.51). Spawn also accepts **image input** via *Additional Fields → Image Binary Properties* (RFC AT, ≥ v1.7) and reports token-budget crossings as a `limits[]` array (RFC AW, ≥ v1.11).
+  - **Run controls (loomcycle v1.82–v1.113)** under *Additional Fields*: per-run **Model** / **Provider** / **Tier** / **Effort** / **Max Tokens** / **Max Iterations** (each only within what the agent definition allows; anything else is refused, never dropped), **Output Schema** (the parsed answer comes back as `structured`), **Tool Choice**, **Hold for Review**, **Idempotency Key** (a retried spawn returns the first run, `deduplicated: true`), **Max Wall Time**, **Context Mode**, **Max Context Tokens**, **Hooks** (HookDef names added to this run, each under its own event) and **No Trace**.
+  - **New operations:** `Get Run` (by run_id, with `result` and the settings it ran with), `List Children`, `Review` (approve, or reject with feedback to make it revise), `Retune` (change a live or parked run's settings without a turn), `Get Run Config` (its overrides, every setting with its source, or the first prompt it received), `Delete Run Tree` (needs `runs:delete`), and **drafts** — `Create Draft` / `Update Draft` / `Start Draft` / `Delete Draft`: validate a run now, start it later.
 - **LoomCycle Memory** — `Get Entry` / `List Entries` / `List Scope IDs` / `List Scopes` / `Set Entry` / `Delete Entry` / `Search` / `Embed Stats` / `Reembed` / `Backfill Embeddings` / `Purge Stale Embeddings`. `Search` (RFC BV/BW, ≥ v1.47) returns one ranked list spanning k/v entries **and** document-chunk bodies, each hit tagged `fact` / `note` / `document`. The three embedding-maintenance ops are **dry-run by default** behind an explicit *Commit* toggle — `Purge Stale Embeddings` deletes. (Per-tool credentials `userCredentials` map on Spawn require loomcycle ≥ v0.12.x.)
 - **LoomCycle Channel** — `Publish` / `Subscribe` / `Peek` / `Ack` / `Await` / `Broadcast` / `List Channels` / `Create Channel` / `Update Channel` / `Delete Channel` / `Purge Channel`. `Await` (fan-in) waits on a predicate across channels and `Broadcast` (fan-out) publishes to many atomically (loomcycle ≥ v0.25); yaml-declared channels remain immutable (but `Purge` is allowed on them).
 - **LoomCycle Agent Definition** — `Create` / `Fork` / `Get` / `List Versions` / `Promote` / `Retire` / `Verify` (content_sha256 round-trip). Create/Fork expose a **Provider** dropdown read live from `GET /v1/config` (≥ v1.38) and folded into the overlay; it always offers the unset default plus the synthetic **Code-JS** provider, which authors a [deterministic JavaScript agent](#code-js-agents) (RFC J).
@@ -82,6 +84,7 @@ As of **2.0.0** the former single multi-resource umbrella node is split into **d
 
 ### Trigger nodes
 
+- **LoomCycle: Review Pending** — polls for runs whose answer is **held for review** (loomcycle ≥ v1.113), so a person can rule on it with **Run → Review**. A rejected answer that comes back revised fires again.
 - **LoomCycle: Run Completed** — fires when an agent run reaches a terminal state. SSE primary with polling fallback for proxy-hostile deployments. Honours `parentAgentId` + `debug` filters from the adapter.
 - **LoomCycle: Channel Message** — long-poll subscribe with two delivery modes: `auto-ack` (at-most-once) and `peek + explicit ack` (at-least-once, cursor persisted in workflow static data).
 - **LoomCycle: Interrupt Pending** — poll-based: fires on new **pending interruptions** (agent questions) for a user, deduping by `interrupt_id`. Wire the output to a human channel (Slack / email / form) and feed the answer back via **LoomCycle Interruption → Resolve**.
@@ -185,6 +188,16 @@ A loomcycle agent can call **`Interruption.ask`** to pause and ask a human a que
 
 > Requires loomcycle's **consumer-MCP interruption backend** so an external resolver is accepted (set in the deployment's yaml). Without it, asks are answered through loomcycle's own Web UI / CLI instead.
 
+### Review holds: approve an answer before it counts
+
+The other direction: the agent has *finished*, and a person decides whether its answer stands (RFC DJ, loomcycle ≥ v1.93).
+
+1. **Spawn** with *Additional Fields → Hold for Review* (or attach an `agent_stop` hook that answers `hold`). The run finishes its answer and is **held**; Spawn returns at once with `awaitingReview: { expiresAt, round }` and the `runId`. (*Wait for Completion* on a held run keeps waiting until it is ruled on.)
+2. **LoomCycle: Review Pending** fires for each held run (or carry the `runId` straight from the Spawn output).
+3. **Run → Review**: *Approve* completes the run with the held answer. *Reject* with feedback sends the feedback back as its next turn, and the run revises and is held again. *Reject* without feedback ends it as `rejected`, which the **Run Completed** trigger can catch.
+
+A hold nobody rules on before `expiresAt` ends the run as `rejected` (`review_expired`) — an unreviewed answer is never approved by default. *Review Time Limit* sets the window.
+
 ## Local development install
 
 Want to install from the local checkout for development?
@@ -234,6 +247,11 @@ npm link @loomcycle/n8n-nodes-loomcycle-full
 | **Hook definitions** (HookDef, RFC DK) | **v1.97** | Hook node. The old `Register` / `List` / `Delete` API was removed upstream in v1.97 |
 | Idempotent spawns (`deduplicated`) | **v1.106** | Spawn reports `deduplicated: true` |
 | Signed hook deliveries · scope-naming 403s · `$cred:`-only MCP headers for non-admins | **v1.113** | Hook → Signing Credential; errors name the missing scope |
+| Per-run model / limits overrides, Retune, Get Run Config | **v1.82** | Run → Spawn fields, Retune, Get Run Config |
+| Drafts (configured runs), output schema, tool choice | **v1.92 – v1.93** | Run → Create / Update / Start / Delete Draft; Output Schema; Tool Choice |
+| Idempotency key, max wall time | **v1.106** | Run → Spawn |
+| Run-tree delete, child-run listing, No Trace | **v1.111 – v1.112** | Run → Delete Run Tree, List Children; Spawn → No Trace |
+| Review Pending trigger (`awaited_state` filter), model dropdown | **v1.113** | LoomCycle: Review Pending; Spawn → Model |
 | **Agent Teams** (RFC AP) — Team node + Team Tool | **v1.17.1** | state-machine graphs of agent roles; board-bound runs resume |
 | Usage + cost attribution (RFC AV) | **v1.10** | Usage → Usage Report |
 | Per-scope token budgets (RFC AW) — read | **v1.11** | Usage → List Limits |

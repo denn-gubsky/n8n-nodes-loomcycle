@@ -1,4 +1,4 @@
-import type { IDataObject, IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
+import type { IDataObject, IExecuteFunctions, INode, INodeExecutionData } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import type {
 	AgentStatus,
@@ -6,6 +6,7 @@ import type {
 	BroadcastChannelsOptions,
 	ChannelAwaitMode,
 	ChannelScope,
+	ConfiguredRunPatch,
 	CreateChannelOptions,
 	HookDefBody,
 	HookDefForkOverlay,
@@ -16,6 +17,7 @@ import type {
 	InterruptStatus,
 	CreateSnapshotOptions,
 	DocumentToolInput,
+	EventHooks,
 	LLMChatMessage,
 	LLMChatOptions,
 	LLMEmbeddingsOptions,
@@ -34,7 +36,7 @@ import type {
 import { getClient, getCredentialDefault } from './helpers/client';
 import { loomcycleErrorFields, wrapLoomcycleError } from './helpers/errors';
 import { buildSegments, readImageParts } from './helpers/segments';
-import { drainRunStream } from './helpers/streaming';
+import { drainRunStream, type RunDrainResult } from './helpers/streaming';
 
 /**
  * Shared execute engine for the loomcycle action nodes. Each standalone
@@ -154,79 +156,127 @@ async function executeRun(
 	i: number,
 ): Promise<IDataObject> {
 	if (operation === 'spawn') {
-		const agent = ctx.getNodeParameter('agent', i) as string;
-		const prompt = ctx.getNodeParameter('prompt', i) as string;
-		const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
-		const userTierParam = ctx.getNodeParameter('userTier', i, '') as string;
-		const treatPromptAsUntrusted = ctx.getNodeParameter('treatPromptAsUntrusted', i, false) as boolean;
 		const additionalFields = ctx.getNodeParameter('additionalFields', i, {}) as IDataObject;
-
-		const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
-		const userTier = userTierParam || (await getCredentialDefault(ctx, 'userTier'));
-
-		// RFC AT (v1.7): optional vision input read off the item's binary
-		// properties and base64'd into `image` content blocks. No images
-		// configured → buildSegments emits exactly what it always did.
-		const images = await readImageParts(ctx, i, additionalFields.imageBinaryProperties);
-
-		const runOpts: RunOptions = {
-			agent,
-			segments: buildSegments(prompt, treatPromptAsUntrusted, images),
-		};
-		if (userId) runOpts.userId = userId;
-		if (userTier) runOpts.userTier = userTier;
+		const runOpts = await buildRunOptions(ctx, client, i, additionalFields);
 		if (additionalFields.sessionId) runOpts.sessionId = additionalFields.sessionId as string;
-		if (additionalFields.agentId) runOpts.agentId = additionalFields.agentId as string;
 		if (additionalFields.userBearer) runOpts.userBearer = additionalFields.userBearer as string;
-
 		// RFC F (v0.12.x): per-tool named credentials map. Template-string
 		// values only — never persisted, never logged by the runtime.
 		const userCredentials = collectNameValuePairs(additionalFields.userCredentials, 'credential');
 		if (Object.keys(userCredentials).length > 0) runOpts.userCredentials = userCredentials;
-
-		// v0.21: non-secret structured metadata delivered to the agent
-		// (input.metadata for code-js; trusted prompt block for LLMs).
-		const metadata = parseObjectField(additionalFields.metadata, ctx.getNode());
-		if (metadata) runOpts.metadata = metadata;
-
-		// v0.28 / v0.32: per-run sampling + compaction overrides (operator-
-		// authored JSON; the adapter + substrate validate the shapes). Each
-		// inherits the agent's value when absent.
-		const sampling = parseObjectField(additionalFields.sampling, ctx.getNode());
-		if (sampling) runOpts.sampling = sampling as RunOptions['sampling'];
-		const compaction = parseObjectField(additionalFields.compaction, ctx.getNode());
-		if (compaction) runOpts.compaction = compaction as RunOptions['compaction'];
-
-		// v0.21: per-run wall-clock ceiling (precedence run > agent > global).
-		if (typeof additionalFields.runTimeoutSeconds === 'number' && additionalFields.runTimeoutSeconds > 0) {
-			runOpts.runTimeoutSeconds = additionalFields.runTimeoutSeconds;
-		}
-
-		// loomcycle v1.13.0 renamed the run body's `allowed_tools` to `tools`
-		// (RunOptions.allowedTools → RunOptions.tools). The n8n PARAMETER keeps
-		// its original name so saved workflows keep resolving — only the wire
-		// field moved.
-		const allowedTools = parseCsv(additionalFields.allowedTools as string);
-		if (allowedTools !== undefined) runOpts.tools = allowedTools;
-		const allowedHosts = parseCsv(additionalFields.allowedHosts as string);
-		if (allowedHosts !== undefined) runOpts.allowedHosts = allowedHosts;
-		const webSearchFilter = additionalFields.webSearchFilter;
-		if (webSearchFilter === 'drop' || webSearchFilter === 'keep') {
-			runOpts.webSearchFilter = webSearchFilter;
-		}
+		const idempotencyKey = ((additionalFields.idempotencyKey as string) ?? '').trim();
+		if (idempotencyKey) runOpts.idempotencyKey = idempotencyKey;
 
 		// RFC AI (v1.1.1): interactive run — park at end_turn for operator
 		// steering rather than running to completion. We must NOT drain to a
 		// terminal state (the stream stays open awaiting input); drain only
 		// until the run parks, then return the run_id so a later Send Input
 		// (or the Run Completed trigger) can drive it.
-		const interactive = additionalFields.interactive === true;
-		if (interactive) runOpts.interactive = true;
-
 		const result = await drainRunStream(client.runStreaming(runOpts), {
-			stopOnAwaitingInput: interactive,
+			stopOnAwaitingInput: runOpts.interactive === true,
 		});
+		return (await withStructuredResult(client, runOpts, result)) as unknown as IDataObject;
+	}
+
+	if (operation === 'createDraft') {
+		// RFC DI (v1.93): validated now, stored, started later. A draft holds no
+		// slot, budget or secret, so bearer / credentials go on Start Draft.
+		const draftFields = ctx.getNodeParameter('draftFields', i, {}) as IDataObject;
+		const runOpts = await buildRunOptions(ctx, client, i, draftFields);
+		const resp = await client.createConfiguredRun(runOpts);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'updateDraft') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const draftFields = ctx.getNodeParameter('draftFields', i, {}) as IDataObject;
+		const patch: ConfiguredRunPatch = {};
+		const prompt = ctx.getNodeParameter('draftPrompt', i, '') as string;
+		if (prompt) {
+			const untrusted = ctx.getNodeParameter('treatPromptAsUntrusted', i, false) as boolean;
+			patch.segments = buildSegments(prompt, untrusted);
+		}
+		Object.assign(patch, await collectRunSettings(ctx, client, draftFields));
+		if (Object.keys(patch).length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'Update Draft needs a new prompt or at least one field to change.', {
+				itemIndex: i,
+			});
+		}
+		const resp = await client.updateConfiguredRun(runId, patch);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'startDraft') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const startFields = ctx.getNodeParameter('startFields', i, {}) as IDataObject;
+		const startOpts: { userBearer?: string; userCredentials?: Record<string, string> } = {};
+		if (startFields.userBearer) startOpts.userBearer = startFields.userBearer as string;
+		const userCredentials = collectNameValuePairs(startFields.userCredentials, 'credential');
+		if (Object.keys(userCredentials).length > 0) startOpts.userCredentials = userCredentials;
+		const result = await drainRunStream(client.startConfiguredRun(runId, startOpts));
 		return result as unknown as IDataObject;
+	}
+
+	if (operation === 'deleteDraft') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		await client.deleteConfiguredRun(runId);
+		return { deleted: true, run_id: runId } as IDataObject;
+	}
+
+	if (operation === 'getRun') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const resp = await client.getRun(runId);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'listChildren') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const pageSize = ctx.getNodeParameter('pageSize', i, 100) as number;
+		const cursor = ctx.getNodeParameter('cursor', i, '') as string;
+		const resp = await client.listChildRuns(runId, {
+			...(pageSize > 0 ? { limit: pageSize } : {}),
+			...(cursor ? { cursor } : {}),
+		});
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'review') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const decision = ctx.getNodeParameter('decision', i) as 'approve' | 'reject';
+		// Feedback is only meaningful on a reject (the server refuses it on an
+		// approval), and the field is hidden for Approve — a stale value must not leak.
+		const feedback = decision === 'reject' ? (ctx.getNodeParameter('feedback', i, '') as string) : '';
+		const resp = await client.reviewRun(runId, decision, feedback ? { feedback } : undefined);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'retune') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const fields = ctx.getNodeParameter('overrides', i, {}) as IDataObject;
+		const overrides = collectRunOverrides(ctx.getNode(), fields);
+		// A field the operator added to the collection is a request even when
+		// false: review false releases a held run, interactive false ends steering.
+		if (typeof fields.interactive === 'boolean') overrides.interactive = fields.interactive;
+		if (typeof fields.review === 'boolean') overrides.review = fields.review;
+		if (Object.keys(overrides).length === 0) {
+			throw new NodeOperationError(ctx.getNode(), 'Retune needs at least one setting to change.', { itemIndex: i });
+		}
+		const resp = await client.retuneRun(runId, overrides);
+		return resp as unknown as IDataObject;
+	}
+
+	if (operation === 'getRunConfig') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const view = ctx.getNodeParameter('configView', i, 'overrides') as string;
+		if (view === 'effective') return (await client.getEffectiveConfig(runId)) as unknown as IDataObject;
+		if (view === 'prompt') return (await client.getRunPrompt(runId)) as unknown as IDataObject;
+		return (await client.getRunConfig(runId)) as unknown as IDataObject;
+	}
+
+	if (operation === 'deleteRunTree') {
+		const runId = ctx.getNodeParameter('runId', i) as string;
+		const resp = await client.deleteRunTree(runId);
+		return resp as unknown as IDataObject;
 	}
 
 	if (operation === 'sendInput') {
@@ -1921,6 +1971,179 @@ function collectNameValuePairs(raw: unknown, key: string): Record<string, string
 		}
 	}
 	return out;
+}
+
+type RunOverrides = Parameters<LoomClient['retuneRun']>[1];
+
+/**
+ * Assemble the RunOptions shared by Spawn and Create Draft: agent, prompt,
+ * identity defaults, and every Additional Field a draft may carry. The
+ * secret-bearing and continuation fields (bearer, per-tool credentials,
+ * session, idempotency key) are left to the caller, because a draft refuses them.
+ */
+async function buildRunOptions(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	i: number,
+	fields: IDataObject,
+): Promise<RunOptions> {
+	const agent = ctx.getNodeParameter('agent', i) as string;
+	const prompt = ctx.getNodeParameter('prompt', i) as string;
+	const userIdParam = ctx.getNodeParameter('userId', i, '') as string;
+	const userTierParam = ctx.getNodeParameter('userTier', i, '') as string;
+	const treatPromptAsUntrusted = ctx.getNodeParameter('treatPromptAsUntrusted', i, false) as boolean;
+
+	const userId = userIdParam || (await getCredentialDefault(ctx, 'userId'));
+	const userTier = userTierParam || (await getCredentialDefault(ctx, 'userTier'));
+
+	// RFC AT (v1.7): optional vision input read off the item's binary
+	// properties and base64'd into `image` content blocks. No images
+	// configured → buildSegments emits exactly what it always did.
+	const images = await readImageParts(ctx, i, fields.imageBinaryProperties);
+
+	const runOpts: RunOptions = {
+		agent,
+		segments: buildSegments(prompt, treatPromptAsUntrusted, images),
+	};
+	if (userId) runOpts.userId = userId;
+	if (userTier) runOpts.userTier = userTier;
+	if (fields.agentId) runOpts.agentId = fields.agentId as string;
+	Object.assign(runOpts, await collectRunSettings(ctx, client, fields));
+	return runOpts;
+}
+
+/**
+ * The run settings a Spawn, a draft and a draft update share — everything in
+ * Additional Fields except identity, input and secrets. Each field is set only
+ * when the operator gave a value, so an untouched field leaves the agent's own
+ * setting in force and the wire body unchanged.
+ */
+async function collectRunSettings(
+	ctx: IExecuteFunctions,
+	client: LoomClient,
+	fields: IDataObject,
+): Promise<Partial<RunOptions>> {
+	const node = ctx.getNode();
+	const out: Partial<RunOptions> = { ...collectRunOverrides(node, fields) };
+
+	// v0.21: non-secret structured metadata delivered to the agent
+	// (input.metadata for code-js; trusted prompt block for LLMs).
+	const metadata = parseObjectField(fields.metadata, node);
+	if (metadata) out.metadata = metadata;
+
+	// v0.28 / v0.32: per-run sampling + compaction overrides (operator-
+	// authored JSON; the adapter + substrate validate the shapes). Each
+	// inherits the agent's value when absent.
+	const sampling = parseObjectField(fields.sampling, node);
+	if (sampling) out.sampling = sampling as RunOptions['sampling'];
+	const compaction = parseObjectField(fields.compaction, node);
+	if (compaction) out.compaction = compaction as RunOptions['compaction'];
+
+	// v0.21: per-run wall-clock ceiling (precedence run > agent > global).
+	if (typeof fields.runTimeoutSeconds === 'number' && fields.runTimeoutSeconds > 0) {
+		out.runTimeoutSeconds = fields.runTimeoutSeconds;
+	}
+
+	// loomcycle v1.13.0 renamed the run body's `allowed_tools` to `tools`
+	// (RunOptions.allowedTools → RunOptions.tools). The n8n PARAMETER keeps
+	// its original name so saved workflows keep resolving — only the wire
+	// field moved.
+	const allowedTools = parseCsv(fields.allowedTools as string);
+	if (allowedTools !== undefined) out.tools = allowedTools;
+	const allowedHosts = parseCsv(fields.allowedHosts as string);
+	if (allowedHosts !== undefined) out.allowedHosts = allowedHosts;
+	const webSearchFilter = fields.webSearchFilter;
+	if (webSearchFilter === 'drop' || webSearchFilter === 'keep') out.webSearchFilter = webSearchFilter;
+
+	if (fields.interactive === true) out.interactive = true;
+
+	// Start-only settings (not changeable by Retune).
+	if (typeof fields.maxWallSeconds === 'number' && fields.maxWallSeconds > 0) {
+		out.maxWallSeconds = fields.maxWallSeconds;
+	}
+	if (typeof fields.maxContextTokens === 'number' && fields.maxContextTokens > 0) {
+		out.maxContextTokens = fields.maxContextTokens;
+	}
+	if (typeof fields.reviewTtlSeconds === 'number' && fields.reviewTtlSeconds > 0) {
+		out.reviewTtlSeconds = fields.reviewTtlSeconds;
+	}
+	if (typeof fields.contextMode === 'string' && fields.contextMode) {
+		out.context = { mode: fields.contextMode as NonNullable<RunOptions['context']>['mode'] };
+	}
+	if (fields.noTrace === true) out.retention = 'none';
+
+	const hookNames = Array.isArray(fields.runHooks) ? (fields.runHooks as string[]).filter((n) => n) : [];
+	if (hookNames.length > 0) out.hooks = await resolveRunHooks(client, hookNames);
+
+	return out;
+}
+
+/**
+ * The per-run settings Retune can also change (`RunOverrideOptions`). Zero and
+ * empty mean "not set" here: none of these fields has a meaningful zero (a
+ * max of 0 tokens or iterations is not a value anyone sets on purpose).
+ */
+function collectRunOverrides(node: INode, fields: IDataObject): RunOverrides {
+	const out: RunOverrides = {};
+	if (typeof fields.model === 'string' && fields.model) out.model = fields.model;
+	if (typeof fields.provider === 'string' && fields.provider) out.provider = fields.provider;
+	if (typeof fields.tier === 'string' && fields.tier) out.tier = fields.tier;
+	if (fields.effort === 'low' || fields.effort === 'medium' || fields.effort === 'high') out.effort = fields.effort;
+	if (typeof fields.maxTokens === 'number' && fields.maxTokens > 0) out.maxTokens = fields.maxTokens;
+	if (typeof fields.maxIterations === 'number' && fields.maxIterations > 0) out.maxIterations = fields.maxIterations;
+	// On a spawn, false is just the default, so only true is sent. Retune sets
+	// an explicit false itself: there it releases a held run as approved.
+	if (fields.review === true) out.review = true;
+
+	const mode = fields.toolChoiceMode;
+	if (mode === 'auto' || mode === 'none' || mode === 'required' || mode === 'tool') {
+		const toolChoice: NonNullable<RunOverrides['toolChoice']> = { mode };
+		const name = typeof fields.toolChoiceName === 'string' ? fields.toolChoiceName.trim() : '';
+		if (mode === 'tool') {
+			if (!name) throw new NodeOperationError(node, 'Tool Choice "Specific Tool" needs a Tool Name.');
+			toolChoice.name = name;
+		}
+		const until = fields.toolChoiceUntil;
+		if (until === 'first_call' || until === 'until_called' || until === 'always') toolChoice.until = until;
+		out.toolChoice = toolChoice;
+	}
+
+	const schema = parseObjectField(fields.outputSchema, node);
+	if (schema) out.outputFormat = { type: 'json_schema', name: 'result', schema };
+	return out;
+}
+
+/**
+ * A per-run hook is attached under the event its HookDef answers; the server
+ * refuses one listed under any other event. Read each named hook's active
+ * version and group them, so the operator picks names and never has to pair
+ * them with events by hand.
+ */
+async function resolveRunHooks(client: LoomClient, names: string[]): Promise<EventHooks> {
+	const hooks: EventHooks = {};
+	for (const name of names) {
+		const def = (await client.hookDef({ op: 'get', name })) as unknown as { definition?: { event?: HookEvent } };
+		const event = def.definition?.event;
+		if (!event) throw new Error(`Hook "${name}" has no active version with an event; promote one first.`);
+		(hooks[event] ??= []).push(name);
+	}
+	return hooks;
+}
+
+/**
+ * With an output format set, the parsed answer lives on the run read
+ * (`result.structured`), not in the stream. Read it once the run has finished;
+ * a run that is held or parked has no final answer yet.
+ */
+async function withStructuredResult(
+	client: LoomClient,
+	runOpts: RunOptions,
+	result: RunDrainResult,
+): Promise<RunDrainResult & { structured?: Record<string, unknown> }> {
+	if (!runOpts.outputFormat || !result.runId || result.awaitingReview || result.awaitingInput) return result;
+	const run = await client.getRun(result.runId);
+	const structured = run.result?.structured;
+	return structured ? { ...result, structured } : result;
 }
 
 // ---- Local helpers ----
