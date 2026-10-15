@@ -8,7 +8,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 import { z } from 'zod';
-import type { LoomcycleClient } from '@loomcycle/client';
+import type { LoomcycleClient, TeamRunTarget } from '@loomcycle/client';
 
 import { getClient } from '../LoomCycle/helpers/client';
 import { loadTeams } from '../LoomCycle/helpers/loadOptions';
@@ -115,6 +115,26 @@ export class LoomCycleTeamTool implements INodeType {
 				],
 			},
 			{
+				displayName: 'Variables',
+				name: 'teamVars',
+				type: 'fixedCollection',
+				placeholder: 'Add Variable',
+				default: {},
+				typeOptions: { multipleValues: true },
+				options: [
+					{
+						name: 'variable',
+						displayName: 'Variable',
+						values: [
+							{ displayName: 'Name', name: 'name', type: 'string', default: '', required: true },
+							{ displayName: 'Value', name: 'value', type: 'string', default: '' },
+						],
+					},
+				],
+				description:
+					'Set the team\'s declared variables on every walk this tool starts (loomcycle ≥ v1.89). Pinned here, not chosen by the model — like the team itself. Undeclared names are refused.',
+			},
+			{
 				displayName: 'A team run walks the whole graph, spawning an agent per state, so it can take a while and consume a real share of the token budget — the parent agent will block on it. It runs under the same admission a normal run gets, so a budget ceiling stops it. Authoring ops (Create / Fork / Delete) are deliberately not exposed to the model; use the LoomCycle Team action node for those.',
 				name: 'teamRunNotice',
 				type: 'notice',
@@ -156,6 +176,7 @@ export class LoomCycleTeamTool implements INodeType {
 interface TeamCaptures {
 	client: LoomcycleClient;
 	teamName: string;
+	vars?: Record<string, string>;
 	boardChunkId?: string;
 	boardScope?: 'agent' | 'user';
 }
@@ -175,6 +196,13 @@ async function captureConfig(
 	const client = await getClient(ctx);
 
 	const captures: TeamCaptures = { client, teamName };
+	const rows = (ctx.getNodeParameter('teamVars', 0, {}) as { variable?: Array<{ name?: string; value?: string }> })
+		.variable;
+	const vars: Record<string, string> = {};
+	for (const row of rows ?? []) {
+		if (row.name) vars[row.name] = row.value ?? '';
+	}
+	if (Object.keys(vars).length > 0) captures.vars = vars;
 	if (boardOptions.boardChunkId) {
 		captures.boardChunkId = boardOptions.boardChunkId;
 		// Only meaningful alongside a board chunk, so never captured alone.
@@ -204,12 +232,8 @@ async function runTeamOp(
 	// Addressed by NAME, so it always resolves the team's active version. The
 	// model never supplies a def_id: pinning an arbitrary version would reopen
 	// the same escalation the pinned name closes.
-	const target: {
-		name: string;
-		input: string;
-		boardChunkId?: string;
-		boardScope?: 'agent' | 'user';
-	} = { name: captures.teamName, input: args.input };
+	const target: TeamRunTarget = { name: captures.teamName, input: args.input };
+	if (captures.vars) target.vars = captures.vars;
 	if (captures.boardChunkId) {
 		target.boardChunkId = captures.boardChunkId;
 		if (captures.boardScope) target.boardScope = captures.boardScope;

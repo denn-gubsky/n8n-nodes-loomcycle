@@ -110,6 +110,13 @@ describe('LoomCycleTeamTool', () => {
 		});
 	});
 
+	it('forwards the operator-pinned variables, and the model cannot add any', async () => {
+		mockClient.runTeam.mockResolvedValue({ status: 'completed' });
+		const tool = await teamTool({ teamVars: { variable: [{ name: 'tone', value: 'formal' }] } });
+		await tool.invoke({ op: 'run', input: 'x', vars: { tone: 'casual', extra: 'y' } } as unknown);
+		expect(mockClient.runTeam).toHaveBeenCalledWith({ name: 'triage', input: 'x', vars: { tone: 'formal' } });
+	});
+
 	// boardScope qualifies a board chunk, so alone it is meaningless.
 	it('omits board scope when no board chunk is configured', async () => {
 		mockClient.runTeam.mockResolvedValue({ status: 'completed' });
