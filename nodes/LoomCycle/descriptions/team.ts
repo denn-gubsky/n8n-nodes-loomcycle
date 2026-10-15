@@ -8,14 +8,14 @@ import type { INodeProperties } from 'n8n-workflow';
  * outcome. It is the closest thing loomcycle has to an n8n workflow, executed
  * inside the substrate rather than on the canvas.
  *
- * Unlike the other Def families this maps to SEVEN TYPED adapter methods
- * (`listTeams` / `getTeamDef` / `createTeam` / `forkTeam` / `deleteTeam` /
- * `runTeam` / `renderTeamDiagram`) rather than one op-discriminated call, so it
- * does not reuse `buildSubstrateInput`.
+ * Unlike the other Def families this maps to TYPED adapter methods (create,
+ * fork, promote, retire, verify, list versions, run, the walk's breakpoints and
+ * its team channels) rather than one op-discriminated call, so it does not
+ * reuse `buildSubstrateInput`. Promote / Retire / Verify reached the adapter in
+ * loomcycle v1.113, closing the gap where a fork could not be put in force.
  *
- * Three substrate ops have NO adapter wrapper and are therefore absent here:
- * `promote`, `retire` and `verify`. That has a real consequence documented on
- * the Fork op below — see the README's upstream-gaps note.
+ * A walk is a run (loomcycle ≥ v1.101): Run returns its `run_id`, which Cancel
+ * Walk, List Walk Runs and the breakpoint ops take.
  *
  * Options arrays are alphabetised by name per the n8n-nodes-base convention.
  */
@@ -28,9 +28,15 @@ export const teamOps: INodeProperties[] = [
 		displayOptions: { show: { resource: ['team'] } },
 		options: [
 			{
+				name: 'Cancel Walk',
+				value: 'cancelWalk',
+				description: 'Stop a running walk and every agent it started, by the walk\'s run ID',
+				action: 'Cancel a team walk',
+			},
+			{
 				name: 'Create',
 				value: 'create',
-				description: 'Author a new team from a workflow graph. Promoted to active immediately.',
+				description: 'Author a new team from a workflow graph (made active unless Promote is off)',
 				action: 'Create a team',
 			},
 			{
@@ -42,7 +48,7 @@ export const teamOps: INodeProperties[] = [
 			{
 				name: 'Fork',
 				value: 'fork',
-				description: 'Save an edited graph as a new version of an existing team. NOT promoted — see the field notes.',
+				description: 'Save an edited graph as a new version of an existing team (not made active unless Promote is on)',
 				action: 'Fork a team',
 			},
 			{
@@ -52,10 +58,52 @@ export const teamOps: INodeProperties[] = [
 				action: 'Get a team version',
 			},
 			{
+				name: 'Get Breakpoints',
+				value: 'getBreakpoints',
+				description: 'Read the breakpoints armed on a live walk',
+				action: 'Get the breakpoints of a walk',
+			},
+			{
 				name: 'List',
 				value: 'list',
 				description: 'List every team the caller may see, each with its version roll-up',
 				action: 'List teams',
+			},
+			{
+				name: 'List Channels',
+				value: 'listChannels',
+				description: 'List the channels a team declares, with message and held counts',
+				action: 'List the channels of a team',
+			},
+			{
+				name: 'List Versions',
+				value: 'listVersions',
+				description: 'List every version of one team, newest first',
+				action: 'List the versions of a team',
+			},
+			{
+				name: 'List Walk Runs',
+				value: 'listWalkRuns',
+				description: 'List the runs of one walk: the walk itself and every member, oldest first',
+				action: 'List the runs of a walk',
+			},
+			{
+				name: 'Peek Channel',
+				value: 'peekChannel',
+				description: 'Read a team channel\'s messages without consuming them',
+				action: 'Peek a team channel',
+			},
+			{
+				name: 'Promote',
+				value: 'promote',
+				description: 'Make one version the team\'s active one, the version a run by name executes',
+				action: 'Promote a team version',
+			},
+			{
+				name: 'Release Channel',
+				value: 'releaseChannel',
+				description: 'Deliver messages a held team channel is storing',
+				action: 'Release a team channel',
 			},
 			{
 				name: 'Render Diagram',
@@ -64,10 +112,28 @@ export const teamOps: INodeProperties[] = [
 				action: 'Render a team diagram',
 			},
 			{
+				name: 'Retire',
+				value: 'retire',
+				description: 'Retire a version, or bring a retired one back',
+				action: 'Retire a team version',
+			},
+			{
 				name: 'Run',
 				value: 'run',
 				description: 'Walk the state graph, spawning each state\'s agent until a terminal state',
 				action: 'Run a team',
+			},
+			{
+				name: 'Set Breakpoints',
+				value: 'setBreakpoints',
+				description: 'Replace the breakpoints armed on a live walk',
+				action: 'Set the breakpoints of a walk',
+			},
+			{
+				name: 'Verify',
+				value: 'verify',
+				description: 'Check a deployed team against a content hash, or check an unsaved graph before saving it',
+				action: 'Verify a team',
 			},
 		],
 		default: 'list',
@@ -82,7 +148,19 @@ export const teamOps: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: {
-			show: { resource: ['team'], operation: ['fork', 'delete', 'renderDiagram'] },
+			show: {
+				resource: ['team'],
+				operation: [
+					'fork',
+					'delete',
+					'renderDiagram',
+					'listVersions',
+					'verify',
+					'listChannels',
+					'peekChannel',
+					'releaseChannel',
+				],
+			},
 		},
 		description:
 			'Team to target. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
@@ -106,8 +184,16 @@ export const teamOps: INodeProperties[] = [
 		type: 'string',
 		default: '',
 		required: true,
-		displayOptions: { show: { resource: ['team'], operation: ['get'] } },
-		description: 'The team version to fetch, e.g. `tdf_…`. Create / Fork return this in their response.',
+		displayOptions: { show: { resource: ['team'], operation: ['get', 'promote', 'retire'] } },
+		description: 'The team version, e.g. `tdf_…`. Create, Fork and List Versions return it.',
+	},
+	{
+		displayName: 'Retired',
+		name: 'retired',
+		type: 'boolean',
+		default: true,
+		displayOptions: { show: { resource: ['team'], operation: ['retire'] } },
+		description: 'Whether to retire the version. Turn off to bring a retired version back.',
 	},
 
 	// ---- The graph ----
@@ -132,11 +218,75 @@ export const teamOps: INodeProperties[] = [
 		description: 'Operator-visible rationale for this version',
 	},
 	{
-		displayName: 'A Fork is created UNPROMOTED, so it does not become the team\'s active version. Name-addressed operations (Run by name, Render Diagram) keep resolving to the previously active version. The adapter exposes no promote method yet, so reach a fork by its returned def_id — Run accepts one — or promote it via the loomcycle CLI / Web UI / MCP.',
-		name: 'forkPromoteNotice',
-		type: 'notice',
+		displayName: 'Promote',
+		name: 'promote',
+		type: 'boolean',
+		default: true,
+		displayOptions: { show: { resource: ['team'], operation: ['create'] } },
+		description: 'Whether to make the new team active at once. Off = author it and put it in force later with Promote.',
+	},
+	{
+		displayName: 'Promote',
+		name: 'promote',
+		type: 'boolean',
+		default: false,
+		displayOptions: { show: { resource: ['team'], operation: ['fork'] } },
+		description:
+			'Whether to make the fork the active version. Off (the default) leaves name-addressed operations (Run by name, Render Diagram) on the previous version until you Promote it; Run can still reach the fork by its def_id.',
+	},
+	{
+		displayName: 'Parent Def ID',
+		name: 'parentDefId',
+		type: 'string',
 		default: '',
 		displayOptions: { show: { resource: ['team'], operation: ['fork'] } },
+		description: 'The version to fork. Empty = the team\'s active version.',
+	},
+
+	// ---- Verify ----
+	{
+		displayName: 'Check',
+		name: 'verifyMode',
+		type: 'options',
+		default: 'hash',
+		displayOptions: { show: { resource: ['team'], operation: ['verify'] } },
+		options: [
+			{ name: 'Deployed Version Against a Hash', value: 'hash', description: 'Drift check for a team kept in source control' },
+			{ name: 'Unsaved Graph', value: 'draft', description: 'Every problem a save would hit, with a JSON path for each, without saving' },
+		],
+		description: 'What to verify',
+	},
+	{
+		displayName: 'Content SHA-256',
+		name: 'contentSha256',
+		type: 'string',
+		default: '',
+		required: true,
+		placeholder: 'sha256:…',
+		displayOptions: { show: { resource: ['team'], operation: ['verify'], verifyMode: ['hash'] } },
+		description: 'The hash to compare with the active version. A team that is not deployed answers deployed: false.',
+	},
+	{
+		displayName: 'Graph (JSON)',
+		name: 'draftOverlay',
+		type: 'json',
+		typeOptions: { rows: 10 },
+		default: '{}',
+		required: true,
+		displayOptions: { show: { resource: ['team'], operation: ['verify'], verifyMode: ['draft'] } },
+		description: 'The graph you are about to save, in the same shape as Create / Fork take',
+	},
+	{
+		displayName: 'Check As',
+		name: 'draftAs',
+		type: 'options',
+		default: 'create',
+		displayOptions: { show: { resource: ['team'], operation: ['verify'], verifyMode: ['draft'] } },
+		options: [
+			{ name: 'Create', value: 'create' },
+			{ name: 'Fork', value: 'fork' },
+		],
+		description: 'Whether the graph would be saved as a new team or as a fork of the existing one',
 	},
 
 	// ---- Run ----
@@ -211,11 +361,188 @@ export const teamOps: INodeProperties[] = [
 		],
 	},
 	{
-		displayName: 'A Run walks the whole graph synchronously, spawning an agent per state — it can be long. It runs under the same admission a normal run gets (token budget, operator-key scope, depth), so a budget ceiling stops it. Bind a Board Chunk ID to make progress durable and resumable.',
+		displayName: 'Wait for the Walk to Finish',
+		name: 'waitForWalk',
+		type: 'boolean',
+		default: true,
+		displayOptions: { show: { resource: ['team'], operation: ['run'] } },
+		description:
+			'Whether to block until the walk ends and return its per-state trace. Off = start it detached and return its run_id at once (loomcycle ≥ v1.101); the walk carries on by itself — follow it with List Walk Runs, the Run Completed trigger, or Cancel Walk.',
+	},
+	{
+		displayName: 'Variables',
+		name: 'runVars',
+		type: 'fixedCollection',
+		placeholder: 'Add Variable',
+		default: {},
+		typeOptions: { multipleValues: true },
+		displayOptions: { show: { resource: ['team'], operation: ['run'] } },
+		options: [
+			{
+				name: 'variable',
+				displayName: 'Variable',
+				values: [
+					{ displayName: 'Name', name: 'name', type: 'string', default: '', required: true },
+					{ displayName: 'Value', name: 'value', type: 'string', default: '' },
+				],
+			},
+		],
+		description:
+			"Set the team's declared variables for this walk (`${var.&lt;name&gt;}`; loomcycle ≥ v1.89). Only names the team declares are accepted; the rest keep their defaults. At most 4 KiB in all.",
+	},
+	{
+		displayName: 'Walk Options',
+		name: 'walkOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['team'], operation: ['run'] } },
+		options: [
+			{
+				displayName: 'Ask a Human at the Iteration Cap',
+				name: 'interruptOnCap',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether a state that reaches its iteration cap asks a human (an interruption) to continue, reroute or abort, instead of ending the walk with iteration_cap. An unanswered ask aborts the walk.',
+			},
+			{
+				displayName: 'Breakpoints (Comma-Separated)',
+				name: 'breakpoints',
+				type: 'string',
+				default: '',
+				placeholder: 'draft, review:review, wave',
+				description: 'Pause the walk at these points: `&lt;state&gt;` (before it dispatches), `&lt;state&gt;:review` (hold its answer) or `wave`',
+			},
+			{
+				displayName: 'Hold States for Review (Comma-Separated)',
+				name: 'reviewStates',
+				type: 'string',
+				default: '',
+				description: 'Hold the answer of each run these states start for an operator\'s verdict (Run → Review on the member\'s run_id)',
+			},
+			{
+				displayName: 'Idempotency Key',
+				name: 'idempotencyKey',
+				type: 'string',
+				default: '',
+				description:
+					'Makes starting the walk safe to retry: a second Run with the same key starts nothing and returns the walk the key holds, marked deduplicated. Not with a board chunk.',
+			},
+			{
+				displayName: 'Review Time Limit (Seconds)',
+				name: 'reviewTtlSeconds',
+				type: 'number',
+				default: 0,
+				typeOptions: { minValue: 0 },
+				description: 'How long each review hold waits before it ends as rejected. 0 = the server default.',
+			},
+		],
+	},
+	{
+		displayName: 'A walk run to the end spawns an agent per state and can take long. It runs under the same admission a normal run gets (token budget, operator-key scope, depth), so a budget ceiling stops it. Bind a Board Chunk ID to make progress durable and resumable, or turn off Wait for the Walk to Finish.',
 		name: 'runDurationNotice',
 		type: 'notice',
 		default: '',
 		displayOptions: { show: { resource: ['team'], operation: ['run'] } },
+	},
+
+	// ---- Walk ops: the walk's run_id ----
+	{
+		displayName: 'Walk Run ID',
+		name: 'walkRunId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: {
+			show: { resource: ['team'], operation: ['cancelWalk', 'listWalkRuns', 'getBreakpoints', 'setBreakpoints'] },
+		},
+		description: 'The walk\'s run_id, as Run returns it',
+	},
+	{
+		displayName: 'Breakpoints (Comma-Separated)',
+		name: 'setBreakpointList',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['team'], operation: ['setBreakpoints'] } },
+		description: 'The whole new set: `&lt;state&gt;`, `&lt;state&gt;:before_dispatch`, `&lt;state&gt;:review` or `wave`. Empty = clear them all.',
+	},
+	{
+		displayName: 'Review Time Limit (Seconds)',
+		name: 'setBreakpointTtl',
+		type: 'number',
+		default: 0,
+		typeOptions: { minValue: 0 },
+		displayOptions: { show: { resource: ['team'], operation: ['setBreakpoints'] } },
+		description: 'Change the review deadline of the walk\'s holds. 0 = leave it.',
+	},
+	{
+		displayName: 'Page Size',
+		name: 'pageSize',
+		type: 'number',
+		default: 100,
+		typeOptions: { minValue: 1, maxValue: 1000 },
+		displayOptions: { show: { resource: ['team'], operation: ['listWalkRuns'] } },
+		description: 'How many runs to return (at most 1 000)',
+	},
+	{
+		displayName: 'Cursor',
+		name: 'cursor',
+		type: 'string',
+		default: '',
+		displayOptions: { show: { resource: ['team'], operation: ['listWalkRuns'] } },
+		description: 'The next_cursor of a previous page. Empty = the first page.',
+	},
+
+	// ---- Team channels ----
+	{
+		displayName: 'Channel Name',
+		name: 'teamChannel',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['team'], operation: ['peekChannel', 'releaseChannel'] } },
+		description: 'The channel\'s local name inside the team, as List Channels shows it',
+	},
+	{
+		displayName: 'Channel Options',
+		name: 'channelOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['team'], operation: ['peekChannel', 'releaseChannel'] } },
+		options: [
+			{
+				displayName: 'Count',
+				name: 'count',
+				type: 'number',
+				default: 1,
+				typeOptions: { minValue: 1, maxValue: 1000 },
+				description: 'Release: how many held messages to deliver, oldest first (at most 1 000)',
+			},
+			{
+				displayName: 'From Cursor',
+				name: 'fromCursor',
+				type: 'string',
+				default: '',
+				description: 'Peek: start after this cursor',
+			},
+			{
+				displayName: 'Max Messages',
+				name: 'maxMessages',
+				type: 'number',
+				default: 50,
+				typeOptions: { minValue: 1 },
+				description: 'Peek: how many messages to return',
+			},
+			{
+				displayName: 'User ID',
+				name: 'userId',
+				type: 'string',
+				default: '',
+				description: 'For a user-scoped team channel: whose layer to read or release',
+			},
+		],
 	},
 
 	// ---- Render Diagram ----
